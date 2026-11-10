@@ -1,0 +1,26 @@
+// QuickBooks record types for Export and Delete (safe to use in the browser).
+export const QB_TYPES: { key: string; label: string; list?: boolean; deletable: boolean; party?: string }[] = [
+  { key: "Purchase", label: "Expenses, checks & card charges", deletable: true, party: "EntityRef" },
+  { key: "Deposit", label: "Deposits", deletable: true },
+  { key: "Transfer", label: "Transfers", deletable: true },
+  { key: "Bill", label: "Bills", deletable: true, party: "VendorRef" },
+  { key: "BillPayment", label: "Bill payments", deletable: true, party: "VendorRef" },
+  { key: "VendorCredit", label: "Vendor credits", deletable: true, party: "VendorRef" },
+  { key: "PurchaseOrder", label: "Purchase orders", deletable: true, party: "VendorRef" },
+  { key: "Invoice", label: "Invoices", deletable: true, party: "CustomerRef" },
+  { key: "Payment", label: "Customer payments", deletable: true, party: "CustomerRef" },
+  { key: "SalesReceipt", label: "Sales receipts", deletable: true, party: "CustomerRef" },
+  { key: "CreditMemo", label: "Credit memos", deletable: true, party: "CustomerRef" },
+  { key: "RefundReceipt", label: "Refund receipts", deletable: true, party: "CustomerRef" },
+  { key: "Estimate", label: "Estimates", deletable: true, party: "CustomerRef" },
+  { key: "JournalEntry", label: "Journal entries", deletable: true },
+  { key: "TimeActivity", label: "Time activities", deletable: true },
+  { key: "Customer", label: "Customers", list: true, deletable: false },
+  { key: "Vendor", label: "Vendors", list: true, deletable: false },
+  { key: "Employee", label: "Employees", list: true, deletable: false },
+  { key: "Item", label: "Products & services", list: true, deletable: false },
+  { key: "Account", label: "Chart of accounts", list: true, deletable: false },
+  { key: "Class", label: "Classes", list: true, deletable: false },
+  { key: "Department", label: "Locations", list: true, deletable: false },
+];
+export const QB_TYPE = new Map(QB_TYPES.map((t) => [t.key, t]));
