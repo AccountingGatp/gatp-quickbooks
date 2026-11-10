@@ -14,7 +14,8 @@ type P = { params: Promise<{ id: string }> };
 export const PUT = route(async (req: Request, { params }: P) => {
   const s = await requireSession();
   const job = await getJob((await params).id);
-  if (!["mapping", "review"].includes(job.status)) throw new Error("This import is already being posted, so its columns can no longer change.");
+  const nothingPosted = (job.counts?.posted || 0) === 0 && ["failed", "partial"].includes(job.status);
+  if (!["mapping", "review"].includes(job.status) && !nothingPosted) throw new Error("Part of this import is already in QuickBooks, so its columns can no longer change. Fix rows in the grid instead.");
   const body = (await req.json()) as { mapping: Record<string, string | null>; fixed?: Record<string, string>; flipSign?: boolean; settings?: Partial<ImportSettings>; entity?: string };
   const def = entityDef(body.entity || job.entity);
   const headers = new Set(job.headers || []);
@@ -39,12 +40,12 @@ export const PUT = route(async (req: Request, { params }: P) => {
       if (v == null || String(v).trim() === "") v = fixed[f.key];
       if (v != null && String(v).trim() !== "") values[f.key] = typeof v === "number" ? String(Math.round(v * 1e6) / 1e6) : String(v).trim();
     }
-    ops.push({ updateOne: { filter: { _id: r._id }, update: { $set: { values, issues: [], status: r.status === "skipped" ? "skipped" : "pending" } } } });
+    ops.push({ updateOne: { filter: { _id: r._id }, update: { $set: { values, issues: [], status: r.status === "skipped" ? "skipped" : "pending" }, $unset: { error: "", requestId: "" } } } });
     if (ops.length >= 500) { await R.bulkWrite(ops, { ordered: false }); ops = []; }
   }
   if (ops.length) await R.bulkWrite(ops, { ordered: false });
 
-  await (await jobs()).updateOne({ _id: job._id }, { $set: { entity: def.key, entityLabel: def.label, mapping, fixed, flipSign: !!body.flipSign, settings, status: "review", updatedAt: new Date() } });
+  await (await jobs()).updateOne({ _id: job._id }, { $set: { entity: def.key, entityLabel: def.label, mapping, fixed, flipSign: !!body.flipSign, settings, status: "review", updatedAt: new Date() }, $unset: { finishedAt: "" } });
 
   // remember this mapping for files with the same columns (fixed values only for this company)
   const sig = signature(job.headers || []);

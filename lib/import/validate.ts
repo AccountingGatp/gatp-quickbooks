@@ -221,6 +221,11 @@ export async function validateJob(jobId: string, only?: Set<string>): Promise<Va
         const prefer = f.prefer || (def.key === "deposits" || def.group === "Sales" ? "Customer" : "Vendor");
         const hit = r.find(f.ref, val, prefer);
         if (hit) {
+          if (hit.kind === "Account" && f.accountTypes && hit.item?.type && !f.accountTypes.includes(hit.item.type)) {
+            const an = (t: string) => (/^[aeiou]/i.test(t) ? "an " : "a ") + t;
+            p.issues.push({ field: f.key, level: "error", msg: `“${hit.name}” is ${an(hit.item.type)} account in QuickBooks. ${f.label} must be ${f.accountTypes.length === 1 ? an(f.accountTypes[0]) : `one of these types: ${f.accountTypes.join(", ")}`} account. Pick it on Match columns (Change columns).` });
+            continue;
+          }
           if (hit.item && hit.item.active === false) p.issues.push({ field: f.key, level: "error", msg: `${KIND_LABEL[hit.kind]} “${hit.name}” is inactive in QuickBooks. Make it active, or choose another.` });
           else if (hit.isNew) p.issues.push({ field: f.key, level: "warning", msg: `New ${KIND_LABEL[hit.kind]} “${hit.name}” will be created` });
           continue;

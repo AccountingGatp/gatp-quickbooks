@@ -5,7 +5,7 @@ import { Badge, Button, Label, Panel, Toggle, cx } from "@/components/ui";
 import { autoMap, hnorm } from "@/lib/import/automap";
 import type { CatalogEntity } from "@/lib/import/entities";
 import type { ImportSettings } from "@/lib/types";
-import { RefLists, type Lists } from "./RefLists";
+import { RefLists, accountListId, type Lists } from "./RefLists";
 
 export type MappingState = { entity: string; mapping: Record<string, string | null>; fixed: Record<string, string>; flipSign: boolean; settings: ImportSettings };
 
@@ -38,7 +38,7 @@ export function Mapping({ cat, headers, samples, initial, saved, lists, busy, on
   const row = (f: CatalogEntity["fields"][number]) => {
     const h = m.mapping[f.key];
     const s = sample(h);
-    const dlId = f.type === "ref" ? `dl-${f.ref === "Name" ? "Name" : f.ref}` : f.options ? `dl-opt-${f.key}` : undefined;
+    const dlId = f.type === "ref" ? (f.ref === "Account" ? accountListId(f.accountTypes) : `dl-${f.ref}`) : f.options ? `dl-opt-${f.key}` : undefined;
     return (
       <tr key={f.key} className="border-b border-rule-2 last:border-0 align-top">
         <td className="px-4 py-2.5">

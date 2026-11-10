@@ -4,6 +4,7 @@ import { Search, ExternalLink, EyeOff, Eye, PencilLine, ChevronLeft, ChevronRigh
 import { Badge, Button, Spinner, Tabs, cx, useToast } from "@/components/ui";
 import { api, money, usDate } from "@/lib/client";
 import type { CatalogEntity } from "@/lib/import/entities";
+import { accountListId } from "./RefLists";
 import type { Counts, Issue } from "@/lib/types";
 
 export type GridRow = {
@@ -35,6 +36,7 @@ export function Review({ jobId, def, counts, visible, editable, onChanged, refre
   const load = useCallback(async () => {
     const r = await api<{ rows: GridRow[]; total: number }>(`/api/jobs/${jobId}/rows?filter=${filter}&offset=${page * PAGE}&limit=${PAGE}&q=${encodeURIComponent(q)}`);
     setRows(r.rows); setTotal(r.total);
+    setSel((s) => new Set([...s].filter((i) => r.rows.some((x) => x.idx === i))));
   }, [jobId, filter, page, q]);
   useEffect(() => { load().catch((e) => toast("error", e.message)); }, [load, refreshKey, toast]);
   useEffect(() => { setPage(0); setSel(new Set()); }, [filter, q]);
@@ -91,7 +93,7 @@ export function Review({ jobId, def, counts, visible, editable, onChanged, refre
           </select>
           <span>to</span>
           <input className="field h-7 w-[220px] py-0" value={fillValue} onChange={(e) => setFillValue(e.target.value)}
-            list={fillField && fieldMeta.get(fillField)?.type === "ref" ? `dl-${fieldMeta.get(fillField)!.ref}` : undefined} placeholder="value" />
+            list={fillField && fieldMeta.get(fillField)?.type === "ref" ? (fieldMeta.get(fillField)!.ref === "Account" ? accountListId(fieldMeta.get(fillField)!.accountTypes) : `dl-${fieldMeta.get(fillField)!.ref}`) : undefined} placeholder="value" />
           <Button size="sm" variant="primary" disabled={!fillField || saving} onClick={() => patch({ fill: { idxs: selIdx, field: fillField, value: fillValue } }, `Updated ${sel.size} rows`).then(() => setSel(new Set()))}>Apply</Button>
           <span className="mx-1 h-4 w-px bg-green-line" />
           <Button size="sm" icon={<EyeOff className="size-3.5" />} onClick={() => patch({ skip: selIdx }, `${sel.size} rows left out`).then(() => setSel(new Set()))}>Leave out</Button>
@@ -200,7 +202,7 @@ function Cell({ value, field, editable, err, warn, onSave }: {
   if (edit) return (
     <td className="!p-1">
       <input ref={ref} className="field h-7 min-w-[120px] py-0" value={v} onChange={(e) => setV(e.target.value)}
-        list={field.type === "ref" ? `dl-${field.ref}` : field.options ? undefined : undefined}
+        list={field.type === "ref" ? (field.ref === "Account" ? accountListId(field.accountTypes) : `dl-${field.ref}`) : undefined}
         onBlur={commit} onKeyDown={(e) => { if (e.key === "Enter") commit(); if (e.key === "Escape") { setV(value); setEdit(false); } }} />
     </td>
   );

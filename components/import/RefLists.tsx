@@ -8,6 +8,10 @@ export function RefLists({ lists }: { lists: Lists }) {
     ["Account", lists.Account || []], ["Vendor", lists.Vendor || []], ["Customer", lists.Customer || []], ["Employee", lists.Employee || []],
     ["Name", names], ["Item", lists.Item || []], ["Class", lists.Class || []], ["Department", lists.Department || []],
     ["PaymentMethod", lists.PaymentMethod || []], ["Term", lists.Term || []],
+    ["Account-Bank", (lists.Account || []).filter((a) => a.type === "Bank")],
+    ["Account-CreditCard", (lists.Account || []).filter((a) => a.type === "Credit Card")],
+    ["Account-BankCard", (lists.Account || []).filter((a) => a.type === "Bank" || a.type === "Credit Card")],
+    ["Account-Deposit", (lists.Account || []).filter((a) => a.type === "Bank" || a.type === "Other Current Asset")],
   ];
   return (
     <>
@@ -18,4 +22,15 @@ export function RefLists({ lists }: { lists: Lists }) {
       ))}
     </>
   );
+}
+
+/** Which pick-list an Account field uses, so a bank account field only offers bank accounts. */
+export function accountListId(types?: string[]) {
+  if (!types?.length) return "dl-Account";
+  const t = [...types].sort().join("|");
+  if (t === "Bank") return "dl-Account-Bank";
+  if (t === "Credit Card") return "dl-Account-CreditCard";
+  if (t === "Bank|Credit Card") return "dl-Account-BankCard";
+  if (t === "Bank|Other Current Asset") return "dl-Account-Deposit";
+  return "dl-Account";
 }

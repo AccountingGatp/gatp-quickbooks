@@ -304,7 +304,7 @@ export const ENTITIES: EntityDef[] = [
       N("credit", "Credit Amount", ["Credit", "Deposit", "Deposits", "Deposit Amount", "Money In", "Paid In", "Receipts", "Credits", "Received"], { required: "one-of" }),
       T("checkNo", "Check No", ["Check Number", "Cheque No", "Check #", "Check or Slip #", "Check or Slip", "Check/Serial #", "Serial #", "Check Serial", "Ref No", "Reference", "Reference No", "Cheque Number"], { max: 21 }),
       T("type", "Transaction Type", ["Type"], { options: ["Expense", "Check", "Deposit", "Transfer", "Bill Payment"] }),
-      R("bankAccount", "Bank Account", "Account", ["Bank", "Bank Account Name"], { required: true, help: "Usually the same for the whole file: pick it once on the mapping screen." }),
+      R("bankAccount", "Bank Account", "Account", ["Bank", "Bank Account Name"], { required: true, accountTypes: ["Bank"], help: "Usually the same for the whole file: pick it once on the mapping screen." }),
       CLASS, LOCATION, T("memo", "Notes", ["Private Note", "Internal Note", "Note"], { max: 4000 }),
     ],
     build: bankStatement,
@@ -323,8 +323,8 @@ export const ENTITIES: EntityDef[] = [
       N("credit", "Payment / Credit Amount", ["Credit", "Credit Amount", "Payments", "Credits"], { required: "one-of" }),
       R("category", "Category Account", "Account", ["Account", "Category", "Expense Account", "GL Account"]),
       T("type", "Transaction Type", ["Type"], { options: ["Expense", "CreditCardCredit", "Transfer"] }),
-      R("bankAccount", "Bank Account", "Account", ["Paid From Bank"], { help: "Bank account used for card payments (transfers)." }),
-      R("ccAccount", "Credit Card Account", "Account", ["Card Account", "Credit Card"], { required: true, help: "Usually the same for the whole file." }),
+      R("bankAccount", "Bank Account", "Account", ["Paid From Bank"], { accountTypes: ["Bank"], help: "Bank account used for card payments (transfers)." }),
+      R("ccAccount", "Credit Card Account", "Account", ["Card Account", "Credit Card"], { required: true, accountTypes: ["Credit Card"], help: "Usually the same for the whole file." }),
       CLASS, LOCATION, T("memo", "Notes", ["Private Note", "Internal Note", "Note"], { max: 4000 }),
     ],
     build: cardStatement,
@@ -335,7 +335,7 @@ export const ENTITIES: EntityDef[] = [
     description: "Expenses paid from a bank or credit card account. Rows with the same Ref No become one expense.",
     fields: [
       T("docNumber", "Ref No", ["Reference No", "Expense No", "Ref #"], { max: 21 }),
-      R("account", "Account", "Account", ["Payment Account", "Bank/Credit Account", "Paid From", "Bank Account"], { required: true }),
+      R("account", "Account", "Account", ["Payment Account", "Bank/Credit Account", "Paid From", "Bank Account"], { required: true, accountTypes: ["Bank", "Credit Card", "Other Current Asset"] }),
       R("payee", "Payee", "Name", ["Vendor", "Name"]),
       MEMO, D("date", "Payment Date", ["Date", "Expense Date", "Txn Date"], { required: true }),
       R("paymentMethod", "Payment Method", "PaymentMethod"),
@@ -356,7 +356,7 @@ export const ENTITIES: EntityDef[] = [
     description: "Checks written from a bank account. Rows with the same check number become one check.",
     fields: [
       T("docNumber", "Check no", ["Check Number", "Check #", "Cheque No"], { max: 21 }),
-      R("account", "Bank Account", "Account", ["Account", "Bank"], { required: true }),
+      R("account", "Bank Account", "Account", ["Account", "Bank"], { required: true, accountTypes: ["Bank"] }),
       R("payee", "Payee", "Name", ["Vendor", "Name", "Pay to the order of"]),
       D("date", "Payment Date", ["Date", "Check Date"], { required: true }),
       T("address1", "Mailing Address Line 1", ["Mailing Address"]), MEMO, LOCATION, ...EXP_LINES,
@@ -372,7 +372,7 @@ export const ENTITIES: EntityDef[] = [
     description: "Refunds and credits received on a credit card.",
     fields: [
       T("docNumber", "Ref No", ["Reference No"], { max: 21 }),
-      R("account", "Account", "Account", ["Credit Card Account", "Card Account"], { required: true }),
+      R("account", "Account", "Account", ["Credit Card Account", "Card Account"], { required: true, accountTypes: ["Credit Card"] }),
       R("payee", "Payee", "Name", ["Vendor", "Name"]), MEMO,
       D("date", "Payment Date", ["Date"], { required: true }), LOCATION, ...EXP_LINES,
     ],
@@ -388,7 +388,7 @@ export const ENTITIES: EntityDef[] = [
     fields: [
       T("docNumber", "Deposit No", ["Deposit Number", "Ref No"]),
       D("date", "Date", ["Deposit Date"], { required: true }),
-      R("account", "Deposit To Account", "Account", ["Deposit To", "Bank Account", "Account"], { required: true }),
+      R("account", "Deposit To Account", "Account", ["Deposit To", "Bank Account", "Account"], { required: true, accountTypes: ["Bank", "Other Current Asset"] }),
       L(R("payee", "Received From", "Name", ["Customer", "Payer", "Name"], { prefer: "Customer" })),
       L(R("category", "Line Account", "Account", ["From Account", "Income Account", "Category"], { required: true })),
       L(T("description", "Line Description", ["Description"])),
@@ -427,11 +427,11 @@ export const ENTITIES: EntityDef[] = [
     key: "card-payments", label: "Credit card payments", group: "Banking", sheetNames: ["Pay down Credit card", "Pay down Credit Card", "Credit Card Payments"],
     description: "Payments from a bank account to a credit card (recorded as a transfer).",
     fields: [
-      R("ccAccount", "Credit Card Account", "Account", ["Card Account"], { required: true }),
+      R("ccAccount", "Credit Card Account", "Account", ["Card Account"], { required: true, accountTypes: ["Credit Card"] }),
       R("payee", "Payee", "Name", ["Vendor"]),
       N("amount", "Amount", ["Payment Amount"], { required: true }),
       D("date", "Date", ["Payment Date"], { required: true }),
-      R("bankAccount", "Bank Account", "Account", ["Paid From", "Bank"], { required: true }),
+      R("bankAccount", "Bank Account", "Account", ["Paid From", "Bank"], { required: true, accountTypes: ["Bank"] }),
       MEMO,
     ],
     build: (rows, c) => {
@@ -467,7 +467,7 @@ export const ENTITIES: EntityDef[] = [
       T("docNumber", "Ref No", ["Payment No", "Check No"], { max: 21 }),
       R("vendor", "Vendor", "Vendor", ["Payee"], { required: true }),
       D("date", "Payment Date", ["Date"], { required: true }),
-      R("account", "Bank or CC Account", "Account", ["Payment Account", "Bank Account", "Account"], { required: true }),
+      R("account", "Bank or CC Account", "Account", ["Payment Account", "Bank Account", "Account"], { required: true, accountTypes: ["Bank", "Credit Card"] }),
       MEMO, L(T("billNo", "Bill No", ["Bill Number", "Bill Ref"])),
       L(N("amount", "Amount", ["Payment Amount", "Amount Paid"], { required: true })),
       ...CURRENCY, T("printStatus", "Print Status"),
@@ -530,7 +530,7 @@ export const ENTITIES: EntityDef[] = [
       D("date", "Payment Date", ["Date"], { required: true }),
       R("customer", "Customer", "Customer", [], { required: true }),
       R("paymentMethod", "Payment method", "PaymentMethod", ["Payment Method"]),
-      R("account", "Deposit To Account Name", "Account", ["Deposit To", "Deposit To Account"]),
+      R("account", "Deposit To Account Name", "Account", ["Deposit To", "Deposit To Account"], { accountTypes: ["Bank", "Other Current Asset"] }),
       L(T("invoiceNo", "Invoice No", ["Invoice Number"])),
       L(N("amount", "Amount", ["Payment Amount"], { required: true })),
       T("refNo", "Reference No", ["Check No", "Payment Reference"], { max: 21 }), MEMO,
@@ -746,11 +746,11 @@ function salesDocs(): EntityDef[] {
     { key: "estimates", label: "Estimates", entity: "Estimate", sheets: ["Estimates", "Estimate", "Quotes"], no: "Estimate No", date: "Estimate Date", desc: "Customer estimates (quotes).", message: "Message displayed on estimate",
       extra: [D("expiration", "Expiration Date")] },
     { key: "sales-receipts", label: "Sales receipts", entity: "SalesReceipt", sheets: ["Sales Receipts", "Sales Receipt"], no: "Sales Receipt No", date: "Sales Receipt Date", desc: "Sales paid on the spot, deposited to an account.", message: "Message displayed on sales receipt",
-      extra: [R("account", "Deposit To", "Account", ["Deposit To Account"]), R("paymentMethod", "Payment Method", "PaymentMethod")] },
+      extra: [R("account", "Deposit To", "Account", ["Deposit To Account"], { accountTypes: ["Bank", "Other Current Asset"] }), R("paymentMethod", "Payment Method", "PaymentMethod")] },
     { key: "credit-memos", label: "Credit memos", entity: "CreditMemo", sheets: ["Credit Memos", "Credit Memo"], no: "Credit Memo No", date: "Credit Memo Date", desc: "Credits given to customers.", message: "Message displayed on credit memo",
       extra: [] },
     { key: "refund-receipts", label: "Refund receipts", entity: "RefundReceipt", sheets: ["Refund Receipts", "Refund Receipt"], no: "Refund Receipt No", date: "Refund Receipt date", desc: "Money refunded to customers from a bank account.", message: "Message displayed on refund receipt",
-      extra: [R("account", "Refunded From", "Account", ["Refund From", "Bank Account"], { required: true }), R("paymentMethod", "Payment method", "PaymentMethod", ["Payment Method"])] },
+      extra: [R("account", "Refunded From", "Account", ["Refund From", "Bank Account"], { required: true, accountTypes: ["Bank", "Other Current Asset", "Credit Card"] }), R("paymentMethod", "Payment method", "PaymentMethod", ["Payment Method"])] },
   ];
   return kinds.map((k) => ({
     key: k.key, label: k.label, group: "Sales" as const, sheetNames: k.sheets, groupBy: "docNumber", description: k.desc,
@@ -846,7 +846,7 @@ export function catalog() {
   return ENTITIES.map((e) => ({
     key: e.key, label: e.label, group: e.group, description: e.description, sheetNames: e.sheetNames,
     groupBy: e.groupBy, sign: e.sign, isList: !!e.list,
-    fields: e.fields.map((f) => ({ key: f.key, label: f.label, type: f.type, ref: f.ref, required: f.required, aliases: f.aliases, line: f.line, help: f.help, options: f.options })),
+    fields: e.fields.map((f) => ({ key: f.key, label: f.label, type: f.type, ref: f.ref, required: f.required, aliases: f.aliases, line: f.line, help: f.help, options: f.options, accountTypes: f.accountTypes })),
   }));
 }
 export type CatalogEntity = ReturnType<typeof catalog>[number];

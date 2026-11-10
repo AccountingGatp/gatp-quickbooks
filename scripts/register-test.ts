@@ -19,7 +19,7 @@ async function run(file: string, label: string) {
   const def = entityDef(key);
   const mapping = autoMap(def.fields, s.headers);
   const title = s.notes[0]?.split("\t")[0].trim();
-  const fixed = { bankAccount: title };
+  const fixed = { bankAccount: process.env.BANK || title };
   console.log(`\n### ${label}: detected=${key} rows=${s.rows.length} headerRow=${s.headerRow} bankAccount="${title}"`);
   console.log("  mapping:", Object.entries(mapping).filter(([, h]) => h).map(([k, h]) => `${k}<-${h}`).join(", "));
   const id = new ObjectId();

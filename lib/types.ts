@@ -38,6 +38,7 @@ export type FieldDef = {
   help?: string;
   max?: number;
   options?: string[]; // allowed values for text fields
+  accountTypes?: string[]; // for Account fields: QuickBooks account types allowed here
 };
 
 export type EntityGroup = "Banking" | "Purchases" | "Sales" | "Accounting" | "Lists";

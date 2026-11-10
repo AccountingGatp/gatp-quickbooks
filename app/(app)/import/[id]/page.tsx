@@ -67,8 +67,10 @@ export default function ImportJob({ params }: { params: Promise<{ id: string }> 
     const title = String(job.notes?.[0] || "").split("\t")[0].trim();
     const m = title.match(/^(\d[\d.-]*)\s+(.+)$/);
     const low = (x: string) => x.toLowerCase().replace(/\s+/g, " ").trim();
-    const hit = title && lists.Account.find((a) => (m && a.number === m[1] && low(a.name.split(":").pop()!) === low(m[2])) || low(a.name) === low(m ? m[2] : title))
-      || (m && lists.Account.filter((a) => a.number === m[1]).length === 1 ? lists.Account.find((a) => a.number === m[1]) : undefined);
+    const want = field === "bankAccount" ? "Bank" : "Credit Card";
+    const accts = lists.Account.filter((a) => a.type === want);
+    const hit = title && accts.find((a) => (m && a.number === m[1] && low(a.name.split(":").pop()!) === low(m[2])) || low(a.name) === low(m ? m[2] : title))
+      || (m && accts.filter((a) => a.number === m[1]).length === 1 ? accts.find((a) => a.number === m[1]) : undefined);
     if (hit) setInitial({ ...initial, fixed: { ...initial.fixed, [field]: hit.name } });
   }, [job, initial, lists]);
 
@@ -196,7 +198,7 @@ export default function ImportJob({ params }: { params: Promise<{ id: string }> 
           <div className="mb-3 flex flex-wrap items-center gap-2">
             <Summary c={c} />
             <div className="ml-auto flex flex-wrap gap-2">
-              {editable && <Button size="sm" icon={<Columns3 className="size-3.5" />} onClick={() => setRemap(true)} disabled={c.posted > 0}>Change columns</Button>}
+              {editable && c.posted === 0 && <Button size="sm" icon={<Columns3 className="size-3.5" />} onClick={() => setRemap(true)}>Change columns</Button>}
               {editable && <Button size="sm" icon={<RefreshCw className="size-3.5" />} loading={busy === "check"} onClick={() => recheck(true)} title="Re-read accounts, names and items from QuickBooks, then check every row again">Check again</Button>}
               {editable && <Button size="sm" icon={<EyeOff className="size-3.5" />} loading={busy === "dups"} onClick={skipDups}>Leave out duplicates</Button>}
               {(finished || c.posted > 0) && <Button size="sm" icon={<Download className="size-3.5" />} loading={busy === "dl"} onClick={downloadResults}>Download results</Button>}

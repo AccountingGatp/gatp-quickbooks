@@ -84,7 +84,10 @@ function faultMessage(j: any, status: number) {
   if (!e) return `QuickBooks error ${status}`;
   const msg = e.Message || e.message || "QuickBooks error";
   const detail = e.Detail || e.detail;
-  return detail && !String(detail).startsWith(msg) ? `${msg}: ${detail}` : String(detail || msg);
+  let out = detail && !String(detail).startsWith(msg) ? `${msg}: ${detail}` : String(detail || msg);
+  // "A business validation error has occurred while processing your request: Business Validation Error: X" -> "X"
+  out = out.replace(/^A business validation error has occurred while processing your request:?\s*/i, "").replace(/^Business Validation Error:\s*/i, "");
+  return out;
 }
 
 /** Raw API call: path is relative to /v3/company/{realmId}/ */
