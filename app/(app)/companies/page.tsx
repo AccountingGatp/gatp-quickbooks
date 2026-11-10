@@ -34,7 +34,7 @@ export default function CompaniesPage() {
 
   return (
     <>
-      <PageHeader title="Companies" sub="Client companies connected to GATP Ledger. Each person picks the company they are working in at the top of the page; that choice is theirs alone."
+      <PageHeader icon={<Building2 />} tone="green" title="Companies" sub="Client companies connected to GATP Ledger. Each person picks the company they are working in at the top of the page; that choice is theirs alone."
         actions={<a href="/api/qbo/connect"><Button variant="primary" icon={<Plus className="size-4" />}>{data?.mock ? "Add demo companies" : "Connect a company"}</Button></a>} />
       <Panel className="mb-5">
         <div className="flex gap-3 text-[13.5px] text-ink-2">

@@ -29,37 +29,42 @@ export function Shell({ user, companies, active, mock, children }: { user: strin
   const isActive = (href: string) => (href === "/" ? path === "/" : path.startsWith(href));
   const nav = (items: typeof NAV) => items.map(({ href, label, icon: I }) => (
     <Link key={href} href={href} aria-current={isActive(href) ? "page" : undefined}
-      className={cx("relative flex items-center gap-2.5 rounded-[var(--radius-sm)] px-2.5 py-[7px] text-[13.5px] font-medium",
-        isActive(href) ? "bg-green-soft text-green" : "text-ink-2 hover:bg-ledger hover:text-ink")}>
-      {isActive(href) && <span className="absolute -left-3 top-1.5 bottom-1.5 w-[3px] rounded-r bg-green" />}
-      <I className="size-[17px]" strokeWidth={1.9} />{label}
+      className={cx("group relative flex items-center gap-3 rounded-[9px] px-3 py-2 text-[13.5px] font-medium transition-colors",
+        isActive(href) ? "bg-white/[.09] text-white" : "text-white/65 hover:bg-white/[.05] hover:text-white")}>
+      {isActive(href) && <span className="absolute -left-3 top-2 bottom-2 w-[3px] rounded-r bg-mint" />}
+      <I className={cx("size-[18px]", isActive(href) ? "text-mint" : "text-white/50 group-hover:text-white/80")} strokeWidth={1.9} />{label}
     </Link>
   ));
   return (
     <ToastProvider>
       <div className="flex min-h-screen">
-        <aside className={cx("fixed inset-y-0 left-0 z-40 flex w-[232px] flex-col border-r border-rule bg-paper px-3 py-4 transition-transform lg:translate-x-0", open ? "translate-x-0" : "-translate-x-full")}>
-          <div className="flex items-center justify-between px-1.5"><Brand /><button className="lg:hidden p-1" onClick={() => setOpen(false)} aria-label="Close menu"><X className="size-4" /></button></div>
-          <nav className="mt-6 flex flex-col gap-0.5">{nav(NAV)}</nav>
-          <div className="my-4 border-t border-rule-2" />
+        <aside className={cx("fixed inset-y-0 left-0 z-40 flex w-[240px] flex-col bg-forest px-3 py-5 transition-transform lg:translate-x-0", open ? "translate-x-0" : "-translate-x-full")}
+          style={{ backgroundImage: "radial-gradient(120% 50% at 0% 0%, rgba(95,211,168,.13), transparent 60%)" }}>
+          <div className="flex items-center justify-between px-2"><Brand dark /><button className="lg:hidden p-1 text-white" onClick={() => setOpen(false)} aria-label="Close menu"><X className="size-4" /></button></div>
+          <div className="mt-7 mb-2 px-3 text-[11px] font-semibold text-white/35">Work</div>
+          <nav className="flex flex-col gap-0.5">{nav(NAV)}</nav>
+          <div className="mt-6 mb-2 px-3 text-[11px] font-semibold text-white/35">Setup</div>
           <nav className="flex flex-col gap-0.5">{nav(NAV2)}</nav>
-          <div className="mt-auto rounded-[var(--radius-md)] border border-rule-2 bg-ledger px-3 py-2.5 text-[12px] text-ink-3">
-            {mock ? <><b className="text-amber">Demo mode.</b> QuickBooks is simulated; nothing reaches a real company.</> : <>Signed in to QuickBooks as GATP Solutions. {companies.length} {companies.length === 1 ? "company" : "companies"} connected.</>}
+          <div className="mt-auto rounded-[10px] border border-white/10 bg-white/[.04] px-3 py-3 text-[12px] leading-relaxed text-white/60">
+            {mock ? <><b className="text-[#f5c45e]">Demo mode.</b> QuickBooks is simulated; nothing reaches a real company.</> : <><span className="mb-1 flex items-center gap-1.5 font-semibold text-white"><span className="size-1.5 rounded-full bg-mint" />Connected to QuickBooks</span>{companies.length} client {companies.length === 1 ? "company" : "companies"}</>}
           </div>
         </aside>
-        {open && <div className="fixed inset-0 z-30 bg-ink/20 lg:hidden" onClick={() => setOpen(false)} />}
-        <div className="flex min-w-0 flex-1 flex-col lg:pl-[232px]">
-          <header className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b border-rule bg-paper/95 px-4 backdrop-blur lg:px-6">
+        {open && <div className="fixed inset-0 z-30 bg-ink/30 lg:hidden" onClick={() => setOpen(false)} />}
+        <div className="flex min-w-0 flex-1 flex-col lg:pl-[240px]">
+          <header className="sticky top-0 z-20 flex h-[60px] items-center gap-3 border-b border-rule bg-paper/90 px-4 backdrop-blur-md lg:px-7">
             <button className="lg:hidden rounded p-1.5 hover:bg-ledger" onClick={() => setOpen(true)} aria-label="Open menu"><Menu className="size-5" /></button>
             <CompanySwitcher companies={companies} active={active} />
             <div className="ml-auto flex items-center gap-3">
-              <span className="hidden text-[13px] text-ink-3 sm:inline">Signed in as <b className="font-semibold text-ink">{user}</b></span>
-              <button onClick={async () => { await api("/api/auth/logout", { json: {} }); location.href = "/login"; }} className="flex items-center gap-1.5 rounded-[var(--radius-sm)] px-2 py-1.5 text-[13px] text-ink-2 hover:bg-ledger" title="Log out">
-                <LogOut className="size-4" /><span className="hidden sm:inline">Log out</span>
+              <span className="hidden items-center gap-2.5 sm:flex">
+                <span className="grid size-8 place-items-center rounded-full bg-gradient-to-br from-mint to-green text-[12px] font-bold text-white">{initials(user)}</span>
+                <span className="leading-tight"><span className="block text-[13px] font-semibold text-ink">{user}</span><span className="block text-[11.5px] text-ink-3">GATP Solutions</span></span>
+              </span>
+              <button onClick={async () => { await api("/api/auth/logout", { json: {} }); location.href = "/login"; }} className="flex items-center gap-1.5 rounded-[var(--radius-sm)] border border-rule px-2.5 py-1.5 text-[13px] text-ink-2 hover:bg-ledger" title="Log out">
+                <LogOut className="size-4" /><span className="hidden md:inline">Log out</span>
               </button>
             </div>
           </header>
-          <main className="mx-auto w-full max-w-[1440px] flex-1 px-4 py-6 lg:px-7">{children}</main>
+          <main className="mx-auto w-full max-w-[1480px] flex-1 px-4 py-7 lg:px-8">{children}</main>
         </div>
       </div>
     </ToastProvider>
@@ -92,8 +97,8 @@ function CompanySwitcher({ companies, active }: { companies: ShellCompany[]; act
   return (
     <div className="relative" ref={box}>
       <button onClick={() => setOpen(!open)} aria-expanded={open}
-        className={cx("flex min-w-[260px] max-w-[420px] items-center gap-2.5 rounded-[var(--radius-md)] border px-2.5 py-1.5 text-left hover:border-ink-4", cur ? "border-rule bg-paper" : "border-amber-line bg-amber-soft")}>
-        <span className={cx("grid size-7 shrink-0 place-items-center rounded-[6px] text-[12px] font-bold", cur ? "bg-ink text-white" : "bg-amber text-white")}>
+        className={cx("flex min-w-[280px] max-w-[440px] items-center gap-2.5 rounded-[10px] border px-2.5 py-1.5 text-left transition-colors hover:border-green-line", cur ? "border-rule bg-ledger" : "border-amber-line bg-amber-soft")}>
+        <span className={cx("grid size-8 shrink-0 place-items-center rounded-[8px] text-[12px] font-bold text-white", cur ? "bg-forest" : "bg-amber")}>
           {cur ? initials(cur.name) : "?"}
         </span>
         <span className="min-w-0 flex-1">

@@ -8,7 +8,7 @@ export { cx };
 type BtnProps = ButtonHTMLAttributes<HTMLButtonElement> & { variant?: "primary" | "secondary" | "ghost" | "danger" | "quiet"; size?: "sm" | "md" | "lg"; icon?: ReactNode; loading?: boolean };
 export function Button({ variant = "secondary", size = "md", icon, loading, className, children, disabled, ...p }: BtnProps) {
   const v = {
-    primary: "bg-green text-white hover:bg-green-2 border border-green-2/40 shadow-[inset_0_-1px_0_rgba(0,0,0,.12)]",
+    primary: "bg-green text-white hover:bg-green-2 border border-green-2/40 shadow-[0_1px_2px_rgba(9,99,74,.25),inset_0_1px_0_rgba(255,255,255,.12)]",
     secondary: "bg-paper text-ink border border-rule hover:border-ink-4 hover:bg-ledger",
     ghost: "text-ink-2 hover:bg-ledger hover:text-ink",
     quiet: "text-green hover:bg-green-soft",
@@ -51,13 +51,26 @@ export function JobStatus({ status, kind }: { status: string; kind?: string }) {
   return <Badge tone={s.tone}>{label}</Badge>;
 }
 
-export function PageHeader({ title, sub, actions, children }: { title: ReactNode; sub?: ReactNode; actions?: ReactNode; children?: ReactNode }) {
+export const CHIP = {
+  green: "bg-green-soft text-green", blue: "bg-blue-soft text-blue", violet: "bg-violet-soft text-violet",
+  teal: "bg-teal-soft text-teal", red: "bg-red-soft text-red", amber: "bg-amber-soft text-amber", gray: "bg-ledger text-ink-2",
+};
+export type ChipTone = keyof typeof CHIP;
+export function IconChip({ tone = "green", children, size = "md" }: { tone?: ChipTone; children: ReactNode; size?: "sm" | "md" | "lg" }) {
+  const s = { sm: "size-7 rounded-[8px] [&_svg]:size-[15px]", md: "size-9 rounded-[10px] [&_svg]:size-[18px]", lg: "size-11 rounded-[12px] [&_svg]:size-[21px]" }[size];
+  return <span className={cx("grid shrink-0 place-items-center", s, CHIP[tone])}>{children}</span>;
+}
+
+export function PageHeader({ title, sub, actions, children, icon, tone }: { title: ReactNode; sub?: ReactNode; actions?: ReactNode; children?: ReactNode; icon?: ReactNode; tone?: ChipTone }) {
   return (
-    <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
-      <div className="min-w-0">
-        <h1 className="text-[22px] font-semibold leading-tight text-ink">{title}</h1>
-        {sub && <p className="mt-1 max-w-[70ch] text-[13.5px] text-ink-3">{sub}</p>}
-        {children}
+    <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
+      <div className="flex min-w-0 items-start gap-3.5">
+        {icon && <IconChip tone={tone} size="lg">{icon}</IconChip>}
+        <div className="min-w-0">
+          <h1 className="text-[24px] font-semibold leading-tight tracking-[-0.02em] text-ink">{title}</h1>
+          {sub && <p className="mt-1 max-w-[76ch] text-[13.5px] text-ink-3">{sub}</p>}
+          {children}
+        </div>
       </div>
       {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
     </div>
@@ -68,12 +81,12 @@ export function Panel({ title, actions, children, className, pad = true }: { tit
   return (
     <section className={cx("panel", className)}>
       {(title || actions) && (
-        <header className="flex items-center justify-between gap-3 border-b border-rule-2 px-4 py-2.5">
-          <h2 className="text-[14px] font-semibold text-ink">{title}</h2>
+        <header className="flex items-center justify-between gap-3 border-b border-rule-2 px-5 py-3">
+          <h2 className="text-[14.5px] font-semibold text-ink">{title}</h2>
           {actions && <div className="flex items-center gap-2">{actions}</div>}
         </header>
       )}
-      <div className={pad ? "p-4" : ""}>{children}</div>
+      <div className={pad ? "p-5" : ""}>{children}</div>
     </section>
   );
 }
@@ -186,12 +199,15 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   );
 }
 
-export function Stat({ label, value, sub, tone }: { label: string; value: ReactNode; sub?: ReactNode; tone?: "red" | "amber" }) {
+export function Stat({ label, value, sub, tone, icon, chip = "green" }: { label: string; value: ReactNode; sub?: ReactNode; tone?: "red" | "amber"; icon?: ReactNode; chip?: ChipTone }) {
   return (
-    <div className="px-4 py-3.5">
-      <div className="text-[12.5px] text-ink-3">{label}</div>
-      <div className={cx("num mt-0.5 text-[24px] font-semibold leading-tight", tone === "red" ? "text-red" : tone === "amber" ? "text-amber" : "text-ink")}>{value}</div>
-      {sub && <div className="mt-0.5 text-[12px] text-ink-3">{sub}</div>}
+    <div className="panel flex items-start gap-3.5 px-5 py-4">
+      {icon && <IconChip tone={chip}>{icon}</IconChip>}
+      <div className="min-w-0">
+        <div className="text-[12.5px] font-medium text-ink-3">{label}</div>
+        <div className={cx("num mt-0.5 text-[26px] font-semibold leading-tight tracking-[-0.02em]", tone === "red" ? "text-red" : tone === "amber" ? "text-amber" : "text-ink")}>{value}</div>
+        {sub && <div className="mt-0.5 text-[12px] text-ink-3">{sub}</div>}
+      </div>
     </div>
   );
 }

@@ -3,8 +3,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import * as XLSX from "xlsx";
-import { FileSpreadsheet, UploadCloud, Link2, Download, Sparkles, ArrowRight, Building2 } from "lucide-react";
-import { Badge, Button, Empty, JobStatus, PageHeader, Panel, Progress, Spinner, cx, useToast } from "@/components/ui";
+import { FileSpreadsheet, UploadCloud, Link2, Download, Sparkles, ArrowRight, Building2, Upload } from "lucide-react";
+import { Badge, Button, Empty, IconChip, JobStatus, PageHeader, Panel, Progress, Spinner, cx, useToast } from "@/components/ui";
+import { ENTITY_ICON, GROUP_TONE } from "@/components/entityIcons";
 import { api, plural, when } from "@/lib/client";
 import { catalog, type CatalogEntity } from "@/lib/import/entities";
 import { detectEntity } from "@/lib/import/automap";
@@ -102,7 +103,7 @@ export default function ImportStart() {
 
   return (
     <>
-      <PageHeader title="Import" sub={<>Upload a spreadsheet, check every line, then post it to <b className="font-semibold text-ink">{company.name}</b>.</>} />
+      <PageHeader icon={<Upload />} title="Import" sub={<>Upload a spreadsheet, check every line, then post it to <b className="font-semibold text-ink">{company.name}</b>.</>} />
 
       <div className="grid gap-5 xl:grid-cols-[1fr_340px]">
         <div className="space-y-5">
@@ -110,10 +111,10 @@ export default function ImportStart() {
           {!file ? (
             <Panel title="Your file">
               <label onDragOver={(e) => { e.preventDefault(); setDrag(true); }} onDragLeave={() => setDrag(false)} onDrop={(e) => { e.preventDefault(); setDrag(false); onFile(e.dataTransfer.files[0]); }}
-                className={cx("flex cursor-pointer flex-col items-center justify-center rounded-[var(--radius-md)] border-2 border-dashed px-6 py-12 text-center transition-colors", drag ? "border-green bg-green-soft" : "border-rule hover:border-green-line hover:bg-ledger")}>
+                className={cx("flex cursor-pointer flex-col items-center justify-center rounded-[var(--radius-md)] border-2 border-dashed px-6 py-12 text-center transition-colors", drag ? "border-green bg-green-soft" : "border-green-line/70 bg-[#f8fbf9] hover:border-green hover:bg-green-soft/50")}>
                 <input ref={input} type="file" accept={ACCEPT} hidden onChange={(e) => onFile(e.target.files?.[0])} />
                 {reading ? <><Spinner className="size-6" /><p className="mt-3 text-[14px] font-medium">Reading the file…</p></> : <>
-                  <UploadCloud className="size-9 text-green" strokeWidth={1.5} />
+                  <span className="grid size-14 place-items-center rounded-full bg-gradient-to-br from-mint to-green text-white shadow-[0_10px_24px_-10px_rgba(13,122,91,.7)]"><UploadCloud className="size-7" strokeWidth={1.8} /></span>
                   <p className="mt-3 text-[15px] font-semibold">Drop a file here, or <span className="text-green underline underline-offset-2">choose a file</span></p>
                   <p className="mt-1 text-[12.5px] text-ink-3">Excel (.xlsx, .xls, .xlsm, .xlsb), CSV, TSV, text or OpenDocument. Header row can be anywhere in the first 30 rows.</p>
                 </>}
@@ -154,21 +155,26 @@ export default function ImportStart() {
           )}
           {/* what */}
           <Panel title={file ? "What the file contains" : "What are you importing?"} actions={chosen && <Button size="sm" variant="ghost" icon={<Download className="size-3.5" />} onClick={() => template(chosen)}>Blank template</Button>}>
-            <button onClick={() => setType("auto")} className={cx("mb-4 flex w-full items-center gap-3 rounded-[var(--radius-md)] border px-3.5 py-2.5 text-left", type === "auto" ? "border-green bg-green-soft" : "border-rule hover:border-ink-4")}>
-              <Sparkles className={cx("size-[18px]", type === "auto" ? "text-green" : "text-ink-3")} />
+            <button onClick={() => setType("auto")} className={cx("mb-5 flex w-full items-center gap-3 rounded-[var(--radius-md)] border px-3.5 py-3 text-left transition-colors", type === "auto" ? "border-green bg-green-soft ring-1 ring-green" : "border-rule hover:border-green-line")}>
+              <IconChip tone="green"><Sparkles /></IconChip>
               <span><span className="block text-[13.5px] font-semibold">Work it out from the file</span><span className="block text-[12.5px] text-ink-3">Reads the sheet names and column titles. SaasAnt template files are recognised sheet by sheet.</span></span>
             </button>
-            <div className="grid gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="space-y-5">
               {GROUPS.map((g) => (
                 <div key={g}>
-                  <div className="mb-1.5 text-[12px] font-semibold text-ink-3">{g}</div>
-                  <div className="flex flex-col">
-                    {CAT.filter((e) => e.group === g).map((e) => (
-                      <button key={e.key} onClick={() => setType(e.key)} title={e.description}
-                        className={cx("rounded-[var(--radius-sm)] px-2 py-1.5 text-left text-[13.5px]", type === e.key ? "bg-green-soft font-semibold text-green" : "text-ink-2 hover:bg-ledger hover:text-ink")}>
-                        {e.label}
-                      </button>
-                    ))}
+                  <div className="mb-2 text-[12.5px] font-semibold text-ink-2">{g}</div>
+                  <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                    {CAT.filter((e) => e.group === g).map((e) => {
+                      const I = ENTITY_ICON[e.key] || FileSpreadsheet;
+                      const on = type === e.key;
+                      return (
+                        <button key={e.key} onClick={() => setType(e.key)} title={e.description}
+                          className={cx("flex items-center gap-2.5 rounded-[10px] border px-2.5 py-2 text-left transition-colors", on ? "border-green bg-green-soft ring-1 ring-green" : "border-rule-2 bg-paper hover:border-green-line hover:bg-ledger")}>
+                          <IconChip tone={GROUP_TONE[g]} size="sm"><I strokeWidth={1.9} /></IconChip>
+                          <span className={cx("text-[13px] leading-tight", on ? "font-semibold text-green" : "font-medium text-ink")}>{e.label}</span>
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               ))}

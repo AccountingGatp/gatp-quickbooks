@@ -38,7 +38,7 @@ export default function RulesPage() {
   return (
     <>
       <RefLists lists={lists} />
-      <PageHeader title="Bank rules" sub={<>Fill in the account, payee and type of bank and card statement lines automatically. Rules run top to bottom; the first match wins, and only empty cells are filled. Rules here apply to <b className="font-semibold text-ink">{co || "this company"}</b>, or to every company if you choose.</>}
+      <PageHeader icon={<Wand2 />} tone="violet" title="Bank rules" sub={<>Fill in the account, payee and type of bank and card statement lines automatically. Rules run top to bottom; the first match wins, and only empty cells are filled. Rules here apply to <b className="font-semibold text-ink">{co || "this company"}</b>, or to every company if you choose.</>}
         actions={<Button variant="primary" icon={<Plus className="size-4" />} onClick={() => setEdit({ ...blank })}>Add rule</Button>} />
       <Panel pad={false}>
         {!rules ? <div className="py-14 text-center"><Spinner /></div> : !rules.length ? (

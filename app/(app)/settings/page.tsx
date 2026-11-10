@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { Copy, CheckCircle2, XCircle } from "lucide-react";
+import { Copy, CheckCircle2, XCircle, Settings2 } from "lucide-react";
 import { Button, Label, PageHeader, Panel, Spinner, Toggle, useToast } from "@/components/ui";
 import { api } from "@/lib/client";
 import type { ImportSettings } from "@/lib/types";
@@ -25,7 +25,7 @@ export default function SettingsPage() {
 
   return (
     <>
-      <PageHeader title="Settings" />
+      <PageHeader icon={<Settings2 />} tone="gray" title="Settings" />
       <div className="grid gap-5 xl:grid-cols-2">
         <Panel title={co ? `Import options for ${co}` : "Import options"}>
           {!s ? <p className="text-[13.5px] text-ink-3">Choose a company at the top to set its default import options.</p> : (

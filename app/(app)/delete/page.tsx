@@ -70,7 +70,7 @@ export default function DeletePage() {
 
   return (
     <>
-      <PageHeader title="Delete" sub={<>Find and remove many transactions at once from <b className="font-semibold text-ink">{co || "the active company"}</b>. A backup file downloads automatically before anything is deleted, and a copy is kept in History.</>} />
+      <PageHeader icon={<Trash2 />} tone="red" title="Delete" sub={<>Find and remove many transactions at once from <b className="font-semibold text-ink">{co || "the active company"}</b>. A backup file downloads automatically before anything is deleted, and a copy is kept in History.</>} />
       <Panel className="mb-5"><SearchForm deletable busy={busy} onSearch={search} submitLabel="Find transactions" /></Panel>
 
       {run && (

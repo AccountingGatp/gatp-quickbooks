@@ -4,7 +4,7 @@ import { activeRealm, requireSession, route } from "@/lib/http";
 export const dynamic = "force-dynamic";
 
 export const GET = route(async (req: Request) => {
-  await requireSession();
+  const session = await requireSession();
   const scope = new URL(req.url).searchParams.get("scope") || "company";
   const realm = await activeRealm();
   const since = new Date(Date.now() - 30 * 864e5);
@@ -21,6 +21,7 @@ export const GET = route(async (req: Request) => {
   for (const j of imports) { const d = new Date(j.createdAt).toISOString().slice(0, 10); if (d in days) days[d] += j.counts?.posted || 0; }
   const soon = Date.now() + 14 * 864e5;
   return {
+    user: session.name,
     imports: imports.length,
     rowsPosted: imports.reduce((s, j) => s + (j.counts?.posted || 0), 0),
     needsAttention: list.filter((j) => ["review", "posting", "partial", "failed"].includes(j.status)).length,

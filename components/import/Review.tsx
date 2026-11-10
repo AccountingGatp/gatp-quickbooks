@@ -111,7 +111,7 @@ export function Review({ jobId, def, counts, visible, editable, onChanged, refre
                 <th className="!p-0" />
                 <th className="w-12 text-right">Row</th>
                 {fields.map((f) => <th key={f.key} className={cx(MONEY.has(f.key) && "text-right")}>{f.label}{f.required === true && <span className="text-red"> *</span>}</th>)}
-                <th className="min-w-[280px]">Check</th>
+                <th className="min-w-[300px]">Check</th>
               </tr>
             </thead>
             <tbody>
@@ -206,7 +206,7 @@ function Cell({ value, field, editable, err, warn, onSave }: {
   );
   return (
     <td onClick={() => editable && setEdit(true)} title={editable ? "Click to edit" : undefined}
-      className={cx("max-w-[280px]", isMoney && "num text-right", editable && "cursor-text", err && "!bg-red-soft", warn && !err && "!bg-amber-soft/70")}>
+      className={cx(field.key === "description" ? "max-w-[240px]" : "max-w-[200px]", isMoney && "num text-right", editable && "cursor-text", err && "!bg-red-soft", warn && !err && "!bg-amber-soft/70")}>
       <span className={cx("block truncate", neg && "text-red", !value && "text-ink-4")}>{shown || (editable ? "—" : "")}</span>
     </td>
   );

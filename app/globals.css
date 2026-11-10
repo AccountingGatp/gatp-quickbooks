@@ -7,35 +7,43 @@
 @theme {
   --font-sans: "Public Sans Variable", ui-sans-serif, system-ui, sans-serif;
 
-  --color-ink: #16262c;
-  --color-ink-2: #3c4f55;
-  --color-ink-3: #6a7c81;
-  --color-ink-4: #9aa9ac;
+  --color-ink: #12261f;
+  --color-ink-2: #3a4d47;
+  --color-ink-3: #66776f;
+  --color-ink-4: #9baba3;
   --color-paper: #ffffff;
-  --color-ledger: #f1f5f0;
-  --color-band: #edf4ec;
-  --color-rule: #d6dfd7;
-  --color-rule-2: #e6ece6;
+  --color-ledger: #f3f6f4;
+  --color-band: #f0f6f2;
+  --color-rule: #dfe6e1;
+  --color-rule-2: #eaefeb;
 
-  --color-green: #0e6e55;
-  --color-green-2: #0a5a45;
-  --color-green-soft: #e0efe8;
-  --color-green-line: #a9d3c2;
+  --color-forest: #0f2a24;
+  --color-forest-2: #16382f;
+  --color-mint: #5fd3a8;
 
-  --color-red: #ad3a30;
-  --color-red-soft: #f8e7e4;
-  --color-red-line: #e9b9b2;
+  --color-green: #0d7a5b;
+  --color-green-2: #09634a;
+  --color-green-soft: #e3f3ec;
+  --color-green-line: #a6dbc6;
 
-  --color-amber: #8a5f00;
-  --color-amber-soft: #fbf0d4;
-  --color-amber-line: #ead08a;
+  --color-red: #c0392f;
+  --color-red-soft: #fbe9e6;
+  --color-red-line: #f0bcb4;
 
-  --color-blue: #275b8a;
-  --color-blue-soft: #e6eef6;
+  --color-amber: #9a6400;
+  --color-amber-soft: #fdf2d8;
+  --color-amber-line: #f0d38c;
 
-  --radius-sm: 5px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
+  --color-blue: #2563a8;
+  --color-blue-soft: #e7f0fb;
+  --color-violet: #6d4fc2;
+  --color-violet-soft: #efeafb;
+  --color-teal: #0e7c86;
+  --color-teal-soft: #e2f4f5;
+
+  --radius-sm: 7px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
 }
 
 @layer base {
@@ -57,14 +65,14 @@
   }
   select.field { @apply pr-7 appearance-none bg-no-repeat; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='none' stroke='%236a7c81' stroke-width='1.6'%3E%3Cpath d='M1 1l4 4 4-4'/%3E%3C/svg%3E"); background-position: right 9px center; }
 
-  .panel { @apply rounded-[var(--radius-md)] border border-rule bg-paper; }
+  .panel { @apply rounded-[var(--radius-md)] border border-rule bg-paper; box-shadow: 0 1px 2px rgba(15,42,36,.04), 0 6px 20px -12px rgba(15,42,36,.12); }
 
   /* the review grid: green-bar ledger paper */
   .ledger-grid { border-collapse: separate; border-spacing: 0; }
-  .ledger-grid thead th { @apply sticky top-0 z-10 border-b border-rule bg-paper px-2.5 py-2 text-left text-[12px] font-semibold text-ink-2 whitespace-nowrap; }
+  .ledger-grid thead th { @apply sticky top-0 z-10 border-b border-rule bg-[#f7faf8] px-2.5 py-2.5 text-left text-[12px] font-semibold text-ink-2 whitespace-nowrap; }
   .ledger-grid tbody td { @apply border-b border-rule-2 px-2.5 py-[7px] align-top text-[13px]; }
   .ledger-grid tbody tr:nth-child(6n+4) td, .ledger-grid tbody tr:nth-child(6n+5) td, .ledger-grid tbody tr:nth-child(6n+6) td { background: var(--color-band); }
-  .ledger-grid tbody tr:hover td { background: #e4eee4; }
+  .ledger-grid tbody tr:hover td { background: #e6f1eb; }
   .ledger-grid tbody tr.is-selected td { background: var(--color-green-soft); }
   .ledger-grid td.rail { @apply w-[4px] p-0; }
 

@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { History as HistoryIcon } from "lucide-react";
+import { History as HistoryIcon, History as HistoryIcon2 } from "lucide-react";
 import { Badge, Button, Empty, JobStatus, PageHeader, Panel, Spinner, Tabs, cx } from "@/components/ui";
 import { api, plural, when } from "@/lib/client";
 
@@ -28,7 +28,7 @@ export default function HistoryPage() {
 
   return (
     <>
-      <PageHeader title="History" sub="Every import and bulk delete, who ran it and what happened. Open an import to see each row, download results or undo it." actions={
+      <PageHeader icon={<HistoryIcon2 />} tone="blue" title="History" sub="Every import and bulk delete, who ran it and what happened. Open an import to see each row, download results or undo it." actions={
         <div className="flex rounded-[var(--radius-sm)] border border-rule bg-paper p-0.5 text-[12.5px]">
           {(["company", "all"] as const).map((s) => <button key={s} disabled={s === "company" && !active} onClick={() => setScope(s)} className={cx("rounded-[4px] px-2.5 py-1 font-medium disabled:opacity-40", scope === s ? "bg-ink text-white" : "text-ink-2 hover:bg-ledger")}>{s === "company" ? "This company" : "All companies"}</button>)}
         </div>} />
