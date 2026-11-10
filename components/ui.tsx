@@ -127,7 +127,7 @@ export function Empty({ icon, title, children, action }: { icon?: ReactNode; tit
   );
 }
 
-export function Modal({ open, onClose, title, children, footer, wide }: { open: boolean; onClose: () => void; title: ReactNode; children: ReactNode; footer?: ReactNode; wide?: boolean }) {
+export function Modal({ open, onClose, title, children, footer, wide, xl }: { open: boolean; onClose: () => void; title: ReactNode; children: ReactNode; footer?: ReactNode; wide?: boolean; xl?: boolean }) {
   useEffect(() => {
     if (!open) return;
     const k = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -137,7 +137,7 @@ export function Modal({ open, onClose, title, children, footer, wide }: { open: 
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-ink/30 p-4 pt-[10vh]" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div role="dialog" aria-modal className={cx("toast-in w-full rounded-[var(--radius-lg)] border border-rule bg-paper shadow-[0_18px_50px_-12px_rgba(22,38,44,.35)]", wide ? "max-w-2xl" : "max-w-md")}>
+      <div role="dialog" aria-modal className={cx("toast-in w-full rounded-[var(--radius-lg)] border border-rule bg-paper shadow-[0_18px_50px_-12px_rgba(22,38,44,.35)]", xl ? "max-w-6xl" : wide ? "max-w-2xl" : "max-w-md")}>
         <header className="flex items-center justify-between border-b border-rule-2 px-5 py-3">
           <h2 className="text-[15px] font-semibold">{title}</h2>
           <button onClick={onClose} className="rounded p-1 text-ink-3 hover:bg-ledger" aria-label="Close"><X className="size-4" /></button>

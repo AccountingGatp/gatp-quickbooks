@@ -27,14 +27,14 @@ export const GET = route(async (req: Request) => {
 
 export const POST = route(async (req: Request) => {
   const { session, company } = await requireCompany();
-  const { entity, fileName, sheetName, headers } = await req.json();
+  const { entity, fileName, sheetName, headers, notes } = await req.json();
   const def = entityDef(String(entity));
   if (!Array.isArray(headers) || !headers.length) throw new Error("The file has no column headers.");
   const now = new Date();
   const doc: JobDoc = {
     _id: new ObjectId(), kind: "import", entity: def.key, entityLabel: def.label, realmId: company._id, companyName: company.name,
     user: session.name, fileName: String(fileName || "file").slice(0, 200), sheetName: String(sheetName || "").slice(0, 100),
-    headers: headers.map((h: unknown) => String(h)).slice(0, 300), status: "mapping", counts: { ...EMPTY_COUNTS },
+    headers: headers.map((h: unknown) => String(h)).slice(0, 300), notes: Array.isArray(notes) ? notes.map((n: unknown) => String(n).slice(0, 300)).slice(0, 6) : [], status: "mapping", counts: { ...EMPTY_COUNTS },
     settings: { ...DEFAULT_SETTINGS, ...(company.settings || {}) }, flipSign: !!def.sign?.defaultFlip, createdAt: now, updatedAt: now,
   };
   await (await jobs()).insertOne(doc);

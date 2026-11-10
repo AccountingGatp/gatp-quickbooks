@@ -17,3 +17,16 @@ export function publicJob(j: JobDoc) {
   const { lockUntil, ...rest } = j;
   return { ...rest, _id: String(j._id), busy: !!lockUntil && lockUntil > Date.now() };
 }
+
+// Row data is stored by column position ("c0", "c1", …), because column titles such as "Ref No." or "$ Amount"
+// are not valid MongoDB field names.
+export const toRaw = (headers: string[], data: Record<string, unknown>) => {
+  const out: Record<string, unknown> = {};
+  headers.forEach((h, i) => { if (data[h] != null && data[h] !== "") out["c" + i] = data[h]; });
+  return out;
+};
+export const fromRaw = (headers: string[], raw: Record<string, unknown> = {}) => {
+  const out: Record<string, unknown> = {};
+  headers.forEach((h, i) => { if (raw["c" + i] != null) out[h] = raw["c" + i]; });
+  return out;
+};

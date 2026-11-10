@@ -9,6 +9,7 @@ import { mockConnect } from "../lib/qbo/oauth";
 import { validateJob } from "../lib/import/validate";
 import { postChunk, rollbackChunk } from "../lib/import/post";
 import { DEFAULT_SETTINGS } from "../lib/types";
+import { toRaw } from "../lib/jobs";
 
 const file = process.argv[2];
 const only = process.argv[3];
@@ -30,7 +31,7 @@ const only = process.argv[3];
     await (await jobRows()).insertMany(s.rows.map((r, i) => {
       const values: Record<string, string> = {};
       for (const f of def.fields) { const h = mapping[f.key]; const v = h ? r.data[h] : fixed[f.key]; if (v != null && String(v).trim() !== "") values[f.key] = String(v).trim(); }
-      return { jobId: String(id), idx: i, sheetRow: r.sheetRow, raw: r.data, values, group: `r:${i}`, status: "pending" as const, issues: [] };
+      return { jobId: String(id), idx: i, sheetRow: r.sheetRow, raw: toRaw(s.headers, r.data), values, group: `r:${i}`, status: "pending" as const, issues: [] };
     }));
     const v = await validateJob(String(id));
     const rows = await (await jobRows()).find({ jobId: String(id) }).toArray();

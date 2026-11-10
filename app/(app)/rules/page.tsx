@@ -1,13 +1,14 @@
 "use client";
 import { useEffect, useState } from "react";
-import { Plus, Wand2, Pencil, Trash2, ArrowUp, ArrowDown } from "lucide-react";
+import { GraduationCap, Plus, Wand2, Pencil, Trash2, ArrowUp, ArrowDown } from "lucide-react";
 import { Badge, Button, Empty, Label, Modal, PageHeader, Panel, Spinner, Toggle, useToast } from "@/components/ui";
 import { RefLists, type Lists } from "@/components/import/RefLists";
+import { LearnRules } from "@/components/LearnRules";
 import { api } from "@/lib/client";
 
-type Rule = { _id?: string; realmId?: string; name: string; enabled: boolean; order?: number; hits?: number; match: { field: "description" | "payee"; op: "contains" | "starts" | "equals"; text: string; direction: "any" | "in" | "out" }; set: { account?: string; payee?: string; type?: string; className?: string; location?: string; memo?: string }; allCompanies?: boolean };
+type Rule = { _id?: string; realmId?: string; name: string; enabled: boolean; order?: number; hits?: number; match: { field: "description" | "payee"; op: "contains" | "starts" | "equals" | "number"; text: string; direction: "any" | "in" | "out" }; set: { account?: string; payee?: string; type?: string; className?: string; location?: string; memo?: string }; allCompanies?: boolean };
 const blank: Rule = { name: "", enabled: true, match: { field: "description", op: "contains", text: "", direction: "any" }, set: {} };
-const OPS = { contains: "contains", starts: "starts with", equals: "is exactly" };
+const OPS = { contains: "contains", starts: "starts with", equals: "is exactly", number: "is only a number" };
 
 export default function RulesPage() {
   const toast = useToast();
@@ -15,6 +16,7 @@ export default function RulesPage() {
   const [edit, setEdit] = useState<Rule | null>(null);
   const [lists, setLists] = useState<Lists>({});
   const [co, setCo] = useState("");
+  const [learn, setLearn] = useState(false);
   const load = () => api("/api/rules").then((r) => setRules(r.rules));
   useEffect(() => {
     load();
@@ -39,11 +41,11 @@ export default function RulesPage() {
     <>
       <RefLists lists={lists} />
       <PageHeader icon={<Wand2 />} tone="violet" title="Bank rules" sub={<>Fill in the account, payee and type of bank and card statement lines automatically. Rules run top to bottom; the first match wins, and only empty cells are filled. Rules here apply to <b className="font-semibold text-ink">{co || "this company"}</b>, or to every company if you choose.</>}
-        actions={<Button variant="primary" icon={<Plus className="size-4" />} onClick={() => setEdit({ ...blank })}>Add rule</Button>} />
+        actions={<><Button icon={<GraduationCap className="size-4" />} onClick={() => setLearn(true)}>Learn from a register</Button><Button variant="primary" icon={<Plus className="size-4" />} onClick={() => setEdit({ ...blank })}>Add rule</Button></>} />
       <Panel pad={false}>
         {!rules ? <div className="py-14 text-center"><Spinner /></div> : !rules.length ? (
           <Empty icon={<Wand2 className="size-8" />} title="No rules yet" action={<Button variant="primary" icon={<Plus className="size-4" />} onClick={() => setEdit({ ...blank, name: "Uber rides", match: { ...blank.match, text: "UBER" }, set: { account: "Travel", payee: "Uber" } })}>Add your first rule</Button>}>
-            For example: when the description contains “UBER”, use account Travel and payee Uber.
+            For example: when the description contains “UBER”, use account Travel and payee Uber. Or let GATP Ledger learn them from a register report of work already done.
           </Empty>
         ) : (
           <table className="ledger-grid w-full">
@@ -56,7 +58,7 @@ export default function RulesPage() {
                     <button className="rounded p-0.5 text-ink-3 hover:bg-ledger disabled:opacity-30" disabled={i === 0} onClick={() => move(i, -1)} aria-label="Move up"><ArrowUp className="size-3.5" /></button>
                     <button className="rounded p-0.5 text-ink-3 hover:bg-ledger disabled:opacity-30" disabled={i === rules.length - 1} onClick={() => move(i, 1)} aria-label="Move down"><ArrowDown className="size-3.5" /></button>
                   </td>
-                  <td><div className="font-medium">{r.name}</div><div className="text-[12.5px] text-ink-3">{r.match.field === "payee" ? "Payee" : "Description"} {OPS[r.match.op]} “{r.match.text}”{r.match.direction !== "any" && (r.match.direction === "in" ? ", money in only" : ", money out only")}</div></td>
+                  <td><div className="font-medium">{r.name}</div><div className="text-[12.5px] text-ink-3">{r.match.field === "payee" ? "Payee" : "Description"} {OPS[r.match.op]}{r.match.op !== "number" && <> “{r.match.text}”</>}{r.match.direction !== "any" && (r.match.direction === "in" ? ", money in only" : ", money out only")}</div></td>
                   <td className="text-[12.5px]">{Object.entries(r.set).filter(([, v]) => v).map(([k, v]) => <div key={k}><span className="text-ink-3">{({ account: "Account", payee: "Payee", type: "Type", className: "Class", location: "Location", memo: "Memo" } as any)[k]}:</span> {v}</div>)}</td>
                   <td>{r.realmId === "*" ? <Badge tone="blue">All companies</Badge> : <Badge>This company</Badge>}{!r.enabled && <Badge className="ml-1">Off</Badge>}</td>
                   <td className="num text-right text-ink-3">{(r.hits || 0).toLocaleString()}</td>
@@ -70,6 +72,7 @@ export default function RulesPage() {
           </table>
         )}
       </Panel>
+      <LearnRules open={learn} onClose={() => setLearn(false)} onAdded={load} company={co} />
       {edit && <RuleForm rule={edit} onClose={() => setEdit(null)} onSave={save} />}
     </>
   );
@@ -87,7 +90,7 @@ function RuleForm({ rule, onClose, onSave }: { rule: Rule; onClose: () => void; 
           <div className="grid gap-2 sm:grid-cols-[150px_140px_1fr]">
             <select className="field" value={r.match.field} onChange={(e) => setR({ ...r, match: { ...r.match, field: e.target.value as any } })}><option value="description">Description</option><option value="payee">Payee</option></select>
             <select className="field" value={r.match.op} onChange={(e) => setR({ ...r, match: { ...r.match, op: e.target.value as any } })}>{Object.entries(OPS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
-            <input className="field" value={r.match.text} placeholder="text, not case sensitive" onChange={(e) => setR({ ...r, match: { ...r.match, text: e.target.value } })} />
+            <input className="field" disabled={r.match.op === "number"} value={r.match.op === "number" ? "" : r.match.text} placeholder={r.match.op === "number" ? "for lines like 260929090020415" : "text, not case sensitive"} onChange={(e) => setR({ ...r, match: { ...r.match, text: e.target.value } })} />
           </div>
           <div className="mt-2 sm:w-[300px]">
             <select className="field" value={r.match.direction} onChange={(e) => setR({ ...r, match: { ...r.match, direction: e.target.value as any } })}><option value="any">Money in or out</option><option value="out">Money out only</option><option value="in">Money in only</option></select>

@@ -4,11 +4,27 @@ import { ObjectId, type AnyBulkWriteOperation } from "mongodb";
 import { jobRows, jobs, rules as rulesCol, companies } from "../db";
 import { parseBool, parseDate, parseNumber, round2 } from "../parse/values";
 import { query, escapeQ } from "../qbo/client";
-import { entityDef, type BuildCtx, type EntityDef, type Vals } from "./entities";
+import { entityDef, normType, type BuildCtx, type EntityDef, type OpenBill, type Vals } from "./entities";
 import { KIND_LABEL, Resolver, norm } from "./resolver";
 import { DEFAULT_SETTINGS, type Counts, type ImportSettings, type Issue, type JobDoc, type ListKind, type RowDoc, type RuleDoc } from "../types";
 
 export const STATEMENTS = new Set(["bank-statement", "card-statement"]);
+
+/** Unpaid bills by vendor (last 3 years), for bank lines that pay a bill. */
+export async function loadOpenBills(realmId: string): Promise<Map<string, OpenBill[]>> {
+  const since = new Date(Date.now() - 3 * 365 * 864e5).toISOString().slice(0, 10);
+  const out = new Map<string, OpenBill[]>();
+  for (let start = 1; start < 50_000; start += 1000) {
+    const rows = (await query(realmId, `select * from Bill where TxnDate >= '${since}' startposition ${start} maxresults 1000`)).Bill || [];
+    for (const b of rows) {
+      const bal = Number(b.Balance ?? 0);
+      if (bal > 0.004 && b.VendorRef?.value) out.set(b.VendorRef.value, [...(out.get(b.VendorRef.value) || []), { id: String(b.Id), balance: bal, date: b.TxnDate, docNumber: b.DocNumber }]);
+    }
+    if (rows.length < 1000) break;
+  }
+  return out;
+}
+export const paysBills = (def: EntityDef, values: Vals[]) => def.key === "bank-statement" && values.some((v) => normType(v.type) === "BillPayment");
 
 export function refKinds(def: EntityDef): ListKind[] {
   const k = new Set<ListKind>(["Account"]);
@@ -77,10 +93,10 @@ function applyRules(rules: RuleDoc[], v: Vals, def: EntityDef): string | undefin
   const amount = parseNumber(v.amount) ?? ((parseNumber(v.credit) ?? 0) - (parseNumber(v.debit) ?? 0));
   for (const r of rules) {
     if (!r.enabled) continue;
-    const hay = norm(r.match.field === "payee" ? v.payee : v.description);
+    const hay = norm(r.match.field === "payee" ? v.payee : [v.description, v.memo].filter(Boolean).join(" "));
     const t = norm(r.match.text);
     if (!t || !hay) continue;
-    const ok = r.match.op === "equals" ? hay === t : r.match.op === "starts" ? hay.startsWith(t) : hay.includes(t);
+    const ok = r.match.op === "number" ? /^[\d\s*#-]+$/.test(hay) : r.match.op === "equals" ? hay === t : r.match.op === "starts" ? hay.startsWith(t) : hay.includes(t);
     if (!ok) continue;
     const isOut = def.key === "card-statement" ? amount > 0 : amount < 0;
     if (r.match.direction === "in" && isOut) continue;
@@ -88,7 +104,8 @@ function applyRules(rules: RuleDoc[], v: Vals, def: EntityDef): string | undefin
     const s = r.set;
     if (s.account && !v.category) v.category = s.account;
     if (s.payee && !v.payee) v.payee = s.payee;
-    if (s.type && !v.type) v.type = s.type;
+    // a bank's own "Debit" / "Credit" label only says which way money moved; the rule knows better
+    if (s.type && (!v.type || ["Expense", "Deposit"].includes(normType(v.type)))) v.type = s.type;
     if (s.className && !v.className) v.className = s.className;
     if (s.location && !v.location) v.location = s.location;
     if (s.memo && !v.memo) v.memo = s.memo;
@@ -123,9 +140,12 @@ function dupKey(entity: string, b: any) {
   if (entity === "Purchase") return `P|${b.AccountRef?.value}|${b.TxnDate}|${total}|${b.Credit ? 1 : 0}`;
   if (entity === "Deposit") return `D|${b.DepositToAccountRef?.value}|${b.TxnDate}|${total}`;
   if (entity === "Transfer") return `T|${b.FromAccountRef?.value}|${b.ToAccountRef?.value}|${b.TxnDate}|${total}`;
+  if (entity === "BillPayment") return `B|${b.CheckPayment?.BankAccountRef?.value || b.CreditCardPayment?.CCAccountRef?.value}|${b.TxnDate}|${total}`;
   return null;
 }
 const DOC_TYPES = new Set(["Bill", "Invoice", "Estimate", "SalesReceipt", "CreditMemo", "RefundReceipt", "PurchaseOrder", "VendorCredit", "JournalEntry", "BillPayment"]);
+const fmtMoney = (n: number) => "$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const usDate = (d?: string) => (d && /^\d{4}-\d{2}-\d{2}/.test(d) ? `${d.slice(5, 7)}/${d.slice(8, 10)}/${d.slice(0, 4)}` : d || "");
 const partyOf = (b: any) => b.VendorRef?.value || b.CustomerRef?.value || "";
 const LABEL: Record<string, string> = { Purchase: "Expense", Deposit: "Deposit", Transfer: "Transfer", Bill: "Bill", Invoice: "Invoice", Estimate: "Estimate", SalesReceipt: "Sales receipt", CreditMemo: "Credit memo", RefundReceipt: "Refund receipt", PurchaseOrder: "Purchase order", VendorCredit: "Vendor credit", JournalEntry: "Journal entry", BillPayment: "Bill payment" };
 
@@ -172,7 +192,7 @@ export async function validateJob(jobId: string, only?: Set<string>): Promise<Va
   // 2. per-group checks
   const ctx: BuildCtx = { r, settings, flip: !!job.flipSign, docs: new Map() };
   const docNeeds = new Map<string, Set<string>>();
-  const built = new Map<string, { entity: string; body: any }>();
+  const built = new Map<string, { entity: string; body: any; error?: string }>();
   const ruleHits = new Map<string, number>();
 
   for (const [g, items] of groups) {
@@ -241,6 +261,8 @@ export async function validateJob(jobId: string, only?: Set<string>): Promise<Va
   }
 
   // 4. build each transaction (dry run) to catch anything QuickBooks would refuse
+  const liveVals = [...groups.values()].flatMap((items) => items.filter((p) => !p.keep && p.row.status !== "skipped").map((p) => p.values));
+  if (paysBills(def, liveVals)) { ctx.openBills = await loadOpenBills(job.realmId); ctx.usedBills = new Set(); }
   for (const [g, items] of groups) {
     if (only && !only.has(g)) continue;
     const live = items.filter((p) => !p.keep && p.row.status !== "skipped");
@@ -255,7 +277,15 @@ export async function validateJob(jobId: string, only?: Set<string>): Promise<Va
       const b = def.build(vals, ctx);
       built.set(g, b);
     } catch (e) {
-      live[0].issues.push({ level: "error", msg: (e as Error).message });
+      const msg = (e as Error).message;
+      const v0 = vals[0];
+      // a bank line paying a bill that is already paid may simply be the payment already in QuickBooks:
+      // let the duplicate check decide before calling it an error
+      if (def.key === "bank-statement" && normType(v0.type) === "BillPayment" && settings.duplicateCheck) {
+        const bank = r.find("Account", v0.bankAccount);
+        const amt = Math.abs(parseNumber(v0.amount) ?? ((parseNumber(v0.credit) ?? 0) - (parseNumber(v0.debit) ?? 0)));
+        built.set(g, { entity: "BillPayment", body: { TxnDate: v0.date, CheckPayment: { BankAccountRef: { value: bank?.value } }, Line: [{ Amount: round2(amt) }] }, error: msg } as any);
+      } else live[0].issues.push({ level: "error", msg });
     }
   }
 
@@ -264,13 +294,14 @@ export async function validateJob(jobId: string, only?: Set<string>): Promise<Va
     const keyed = [...built.entries()].map(([g, b]) => ({ g, b, key: dupKey(b.entity, b.body) }));
     const byType = new Map<string, string[]>();
     for (const k of keyed) if (k.key && k.b.body.TxnDate) byType.set(k.b.entity, [...(byType.get(k.b.entity) || []), k.b.body.TxnDate]);
-    const existing = new Map<string, { id: string; label: string }>();
+    // each QuickBooks transaction can only be the duplicate of one row (two identical bank lines need two matches)
+    const existing = new Map<string, { id: string; label: string }[]>();
     for (const [type, dates] of byType) {
       const sorted = dates.sort();
       const res = await queryAllDates(job.realmId, type, sorted[0], sorted[sorted.length - 1]);
       for (const t of res) {
         const k = dupKey(type, t);
-        if (k) existing.set(k, { id: t.Id, label: `${LABEL[type]} on ${t.TxnDate} for $${Number(t.TotalAmt ?? t.Amount ?? 0).toFixed(2)}` });
+        if (k) existing.set(k, [...(existing.get(k) || []), { id: t.Id, label: `${LABEL[type]} on ${usDate(t.TxnDate)} for ${fmtMoney(Number(t.TotalAmt ?? t.Amount ?? 0))}` }]);
       }
     }
     // document numbers
@@ -281,19 +312,20 @@ export async function validateJob(jobId: string, only?: Set<string>): Promise<Va
     for (const [type, nums] of docType) {
       await chunked([...new Set(nums)], 40, async (part) => {
         const res = await query(job.realmId, `select * from ${type} where DocNumber IN (${part.map((n) => `'${escapeQ(n)}'`).join(",")}) maxresults 1000`);
-        for (const t of res[type] || []) existingDocs.set(`${type}|${String(t.DocNumber).toLowerCase()}|${partyOf(t)}`, { id: t.Id, label: `${LABEL[type]} no. ${t.DocNumber} (${t.TxnDate})` });
+        for (const t of res[type] || []) existingDocs.set(`${type}|${String(t.DocNumber).toLowerCase()}|${partyOf(t)}`, { id: t.Id, label: `${LABEL[type]} no. ${t.DocNumber} (${usDate(t.TxnDate)})` });
       });
     }
     const seenInFile = new Map<string, number>();
     for (const k of keyed) {
       const first = groups.get(k.g)!.find((p) => !p.keep && p.row.status !== "skipped")!;
       let hit: { id: string; label: string } | undefined;
-      if (k.key) hit = existing.get(k.key);
+      if (k.key) hit = existing.get(k.key)?.shift();
       if (!hit && DOC_TYPES.has(k.b.entity) && k.b.body.DocNumber) {
         const party = partyOf(k.b.body);
         hit = existingDocs.get(`${k.b.entity}|${String(k.b.body.DocNumber).toLowerCase()}|${party}`)
           || (k.b.entity === "JournalEntry" ? existingDocs.get(`${k.b.entity}|${String(k.b.body.DocNumber).toLowerCase()}|`) : undefined);
       }
+      if (!hit && k.b.error) { first.issues.push({ level: "error", msg: k.b.error }); continue; }
       if (hit) {
         const rowsOfTxn = groups.get(k.g)!.filter((p) => !p.keep && p.row.status !== "skipped");
         first.row.dup = { type: k.b.entity, id: hit.id, label: hit.label };
@@ -306,7 +338,7 @@ export async function validateJob(jobId: string, only?: Set<string>): Promise<Va
       const fk = k.key || (k.b.body.DocNumber ? `${k.b.entity}|${k.b.body.DocNumber}|${partyOf(k.b.body)}` : null);
       if (fk && !k.g.startsWith("g:")) {
         const prev = seenInFile.get(fk);
-        if (prev != null) first.issues.push({ level: "warning", msg: `Same as row ${prev} of this file — check it is not entered twice` });
+        if (prev != null) first.issues.push({ level: "warning", msg: `Same date and amount as row ${prev} of this file. Fine if the bank really shows both.` });
         else seenInFile.set(fk, first.row.sheetRow);
       }
     }

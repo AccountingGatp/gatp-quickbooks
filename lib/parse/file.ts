@@ -6,6 +6,7 @@ export type ParsedSheet = {
   name: string;
   headers: string[];
   headerRow: number; // 1-based Excel row number of the header
+  notes: string[]; // text above the header (report titles such as "10004 Truist Checking 6638")
   rows: { sheetRow: number; data: Record<string, unknown> }[];
 };
 
@@ -71,7 +72,8 @@ export function readWorkbook(buf: ArrayBuffer, fileName: string): ParsedSheet[] 
     }
     // drop columns that are empty in every row and have a generated name
     const used = headers.filter((h) => !h.startsWith("Column ") || rows.some((r) => h in r.data));
-    if (rows.length) out.push({ name, headers: used, headerRow: range.s.r + best + 1, rows });
+    const notes = grid.slice(0, best).map((r) => r.filter((v) => v != null && String(v).trim() !== "").map(String).join("\t").trim()).filter(Boolean).slice(0, 6);
+    if (rows.length) out.push({ name, headers: used, headerRow: range.s.r + best + 1, rows, notes });
   }
   return out;
 }

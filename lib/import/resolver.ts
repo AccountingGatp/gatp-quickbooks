@@ -56,12 +56,25 @@ export class Resolver {
     const v = norm(value);
     let hit = m.get(v);
     if (!hit && kind === "Account") {
-      if (this.settings.matchAccountByNumber) {
-        hit = m.get("#" + v);
-        const num = v.match(/^(\d[\d.-]*)\s+[-–:]?\s*(.+)$/); // "6100 Office Supplies" / "6100 - Office Supplies"
-        if (!hit && num) hit = m.get("#" + num[1]) || m.get(num[2]);
+      // QuickBooks reports write accounts as "70000 Operating Expenses:70019 IT Services / Software".
+      // Numbers can repeat between accounts, so names are tried before numbers.
+      const segs = v.split(":").map((x) => x.trim());
+      const parsed = segs.map((x) => { const mm = x.match(/^(\d[\d.-]*)\s+[-–]?\s*(.+)$/); return mm ? { num: mm[1], name: mm[2].trim() } : { num: "", name: x }; });
+      const fullNoNum = parsed.map((x) => x.name).join(":");
+      const last = parsed[parsed.length - 1];
+      hit = m.get(fullNoNum);
+      if (!hit && segs.length === 1 && last.name !== v) hit = m.get(last.name);
+      if (!hit && this.settings.matchAccountByNumber) {
+        if (/^\d[\d.-]*$/.test(v)) hit = m.get("#" + v);
+        if (!hit && last.num) {
+          const byNum = this.list("Account").filter((a) => a.number === last.num);
+          hit = byNum.length === 1 ? byNum[0] : byNum.find((a) => norm(a.name) === last.name);
+        }
       }
-      if (!hit && v.includes(":")) hit = m.get(v.split(":").pop()!.trim());
+      if (!hit && segs.length > 1) {
+        const same = this.list("Account").filter((a) => norm(a.name) === last.name);
+        if (same.length === 1) hit = same[0];
+      }
     }
     if (!hit && kind === "Item") hit = m.get("sku:" + v) || (v.includes(":") ? m.get(v.split(":").pop()!.trim()) : undefined);
     if (!hit && (kind === "Customer" || kind === "Class" || kind === "Department") && v.includes(":")) hit = m.get(v.split(":").pop()!.trim());

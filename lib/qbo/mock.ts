@@ -16,6 +16,7 @@ export const DEMO_COMPANIES = [
   { realmId: "demo-lxp", name: "LXP Enterprises, LLC" },
   { realmId: "demo-northwind", name: "Northwind Bakery Co" },
   { realmId: "demo-cedar", name: "Cedar Ridge Dental" },
+  { realmId: "demo-eldersburg", name: "Eldersburg Arthritis (demo)" },
 ];
 
 async function store() {
@@ -37,6 +38,7 @@ async function seed(realmId: string) {
     return Id;
   };
   add("CompanyInfo", { CompanyName: name, Country: "US" });
+  if (realmId === "demo-eldersburg") { seedEldersburg(add); await s.insertMany(recs); return; }
   const acct = (Name: string, AccountType: string, AccountSubType: string, AcctNum?: string) =>
     add("Account", { Name, FullyQualifiedName: Name, AccountType, AccountSubType, AcctNum, Classification: "" });
   const checking = acct("Checking", "Bank", "Checking", "1010");
@@ -86,6 +88,46 @@ async function seed(realmId: string) {
   add("Purchase", { TxnDate: `${ym}-05`, PaymentType: "CreditCard", AccountRef: { value: visa, name: "Visa Credit Card" }, TotalAmt: 52.99, Line: [{ Amount: 52.99, DetailType: "AccountBasedExpenseLineDetail", AccountBasedExpenseLineDetail: { AccountRef: { value: office, name: "Office Supplies" } } }] });
   add("Bill", { DocNumber: "INV-7781", TxnDate: `${ym}-01`, VendorRef: { value: staples, name: "Staples" }, TotalAmt: 410, Balance: 410, Line: [{ Amount: 410, DetailType: "AccountBasedExpenseLineDetail", AccountBasedExpenseLineDetail: { AccountRef: { value: office } } }] });
   await s.insertMany(recs);
+}
+
+/** A chart of accounts shaped like the Eldersburg Arthritis register (numbered, with sub-accounts). */
+function seedEldersburg(add: (entity: string, data: any) => string) {
+  const ids = new Map<string, string>();
+  const acct = (full: string, AccountType: string, AccountSubType: string, AcctNum?: string) => {
+    const parts = full.split(":");
+    const Name = parts[parts.length - 1];
+    const parent = parts.length > 1 ? ids.get(parts.slice(0, -1).join(":")) : undefined;
+    const id = add("Account", { Name, FullyQualifiedName: full, AccountType, AccountSubType, AcctNum, ...(parent ? { SubAccount: true, ParentRef: { value: parent } } : {}) });
+    ids.set(full, id);
+    return id;
+  };
+  acct("Truist Checking 6638", "Bank", "Checking", "10004");
+  acct("Truist Savings 2025", "Bank", "Savings", "10006");
+  acct("Visa Card", "Credit Card", "CreditCard", "10015");
+  acct("Undeposited Funds", "Other Current Asset", "UndepositedFunds", "11001");
+  acct("Loan to/from Nexus Health Centre 2025", "Other Current Asset", "LoansToOthers", "11005");
+  acct("Accounts Payable", "Accounts Payable", "AccountsPayable", "12000");
+  acct("Due to/from NEC", "Other Current Liability", "OtherCurrentLiabilities");
+  acct("Payroll Clearing", "Other Current Liability", "PayrollClearing");
+  acct("Payroll Clearing:Taxes to Pay", "Other Current Liability", "PayrollTaxPayable");
+  acct("Patient Revenue", "Income", "ServiceFeeIncome", "40000");
+  acct("Ask My Accountant", "Expense", "OtherMiscellaneousServiceCost");
+  acct("Bank Fees", "Expense", "BankCharges", "70016");
+  acct("Billing Software", "Expense", "OfficeGeneralAdministrativeExpenses", "70028");
+  acct("Rent Expense", "Expense", "RentOrLeaseOfBuildings", "70095");
+  acct("Operating Expenses", "Expense", "OtherMiscellaneousServiceCost", "70000");
+  acct("Operating Expenses:IT Services / Software", "Expense", "OfficeGeneralAdministrativeExpenses", "70019");
+  acct("Operating Expenses:Software & Subscriptions / Dues", "Expense", "DuesSubscriptions", "70027");
+  acct("Operating Expenses:Printing & Stationery", "Expense", "SuppliesMaterials", "70032");
+  acct("Operating Expenses:Insurance Expense", "Expense", "Insurance", "70032");
+  acct("Operating Expenses:Insurance Expense:Life and Disability Insurance", "Expense", "Insurance", "70033");
+  acct("Operating Expenses:Operating expense Lease", "Expense", "RentOrLeaseOfBuildings", "70095");
+  for (const n of ["Corporate", "Eldersburg"]) add("Class", { Name: n, FullyQualifiedName: n });
+  const vendors = new Map<string, string>();
+  for (const n of ["Global Payments", "Dex Imaging", "E Clinical Works", "PRIME STORAGE ELDERSBURG", "GATP Solutions", "Amwins", "The Hanover Insurance Group", "Principal Life", "Mid-Atlantic Rheumatology, LLC", "COMCAST"])
+    vendors.set(n, add("Vendor", { DisplayName: n }));
+  // "We Infuse" is left out on purpose: the import creates it
+  add("Bill", { DocNumber: "AMW-0926", TxnDate: "2026-09-26", VendorRef: { value: vendors.get("Amwins"), name: "Amwins" }, TotalAmt: 13680.76, Balance: 13680.76, Line: [{ Amount: 13680.76, DetailType: "AccountBasedExpenseLineDetail", AccountBasedExpenseLineDetail: { AccountRef: { value: ids.get("Operating Expenses:Insurance Expense") } } }] });
 }
 
 // ---------------------------------------------------------------- tiny query engine
@@ -198,7 +240,21 @@ async function create(realmId: string, entity: string, body: any) {
     ...(LISTS.has(entity) ? { Active: body.Active ?? true } : { TotalAmt: Math.round(total(entity, body) * 100) / 100, TxnDate: body.TxnDate || nowIso().slice(0, 10) }),
   };
   await s.insertOne({ realmId, entity, Id, data });
+  if (entity === "BillPayment") await applyToBills(realmId, body, -1);
   return data;
+}
+
+/** A bill payment lowers the unpaid balance of the bills it pays (and raises it back when deleted). */
+async function applyToBills(realmId: string, pay: any, sign: 1 | -1) {
+  const s = await store();
+  for (const l of pay.Line || []) for (const t of l.LinkedTxn || []) {
+    if (t.TxnType !== "Bill") continue;
+    const b = await s.findOne({ realmId, entity: "Bill", Id: String(t.TxnId) });
+    if (!b) throw fault("Invalid Reference Id", `Bill ${t.TxnId} not found`);
+    const bal = Math.round((Number(b.data.Balance || 0) + sign * Number(l.Amount || 0)) * 100) / 100;
+    if (bal < -0.004) throw fault("Business Validation Error", "The payment is more than the unpaid amount of the bill");
+    await s.updateOne({ _id: b._id }, { $set: { "data.Balance": bal } });
+  }
 }
 
 async function update(realmId: string, entity: string, body: any) {
@@ -217,6 +273,7 @@ async function remove(realmId: string, entity: string, body: any) {
   const cur = await s.findOne({ realmId, entity, Id: String(body.Id) });
   if (!cur) throw fault("Object Not Found", `${entity} ${body.Id} not found`);
   await s.deleteOne({ realmId, entity, Id: String(body.Id) });
+  if (entity === "BillPayment") await applyToBills(realmId, cur.data, 1);
   return { Id: body.Id, status: "Deleted" };
 }
 

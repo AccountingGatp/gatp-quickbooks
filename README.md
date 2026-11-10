@@ -23,6 +23,28 @@ Built with Next.js 15 (App Router), MongoDB and the QuickBooks Online Accounting
 | **History & log** | Every import and delete with its rows and results; an activity log of who did what in which company. |
 | **Dashboard** | Last 30 days per company or all companies, imports waiting for review, companies that need reconnecting. |
 
+## Bank updates (replacing SaasAnt)
+
+Monthly routine for each client:
+
+1. **Once per client — teach it.** Bank rules → *Learn from a register*. Upload a register report of a month that is already done
+   (QuickBooks: Chart of accounts → bank account → View register → Export to Excel). GATP Ledger finds the bank text that is always
+   categorised the same way ("HCCLAIMPMT" → 11001 Undeposited Funds, class Corporate; "CABLE SVCS" → IT Services, payee COMCAST …)
+   and suggests rules. Lines categorised differently each time get no rule, so nothing is guessed.
+2. **Each month — import the bank download.** Import → drop the CSV/Excel from online banking → pick the bank account once →
+   Check rows. Rules fill account, class, payee and type. With the Eldersburg register as teacher, all 87 lines of the next raw
+   Truist download were filled automatically.
+3. **Review** anything red or amber, then **Post**. Lines already in QuickBooks (same bank account, date and amount — counted one for one,
+   so two genuine $375.00 payments on the same day are both kept) are left out automatically.
+
+Also understood:
+
+- QuickBooks register exports as input (title line gives the bank account; Memo = bank text; Payment / Deposit columns;
+  Type = Deposit, Expense, Check, Transfer, Credit Card Pmt, Bill Payment).
+- Accounts written as "70000 Operating Expenses:70019 IT Services / Software" (names win over numbers, since numbers can repeat).
+- **Bill Payment** lines pay the vendor's unpaid bill(s) in QuickBooks (one bill with the same amount, or the oldest bills adding up to it)
+  instead of posting a second expense.
+
 ## Deploy (Vercel Pro + MongoDB Atlas)
 
 1. **MongoDB Atlas** → create a cluster (M10 or higher recommended for production; M0 works for testing) → Database Access: add a user → Network Access: allow `0.0.0.0/0` (Vercel uses changing IPs) → Connect → Drivers → copy the connection string.

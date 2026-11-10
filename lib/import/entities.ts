@@ -12,7 +12,10 @@ export type BuildCtx = {
   settings: ImportSettings;
   flip: boolean;
   docs: Map<string, { id: string; party?: string }[]>; // "Bill|NUMBER" -> existing bills
+  openBills?: Map<string, OpenBill[]>; // vendor id -> unpaid bills (for bank lines that pay a bill)
+  usedBills?: Set<string>; // bills already paid by an earlier line of the same file
 };
+export type OpenBill = { id: string; balance: number; date: string; docNumber?: string };
 
 export type EntityDef = {
   key: string;
@@ -172,8 +175,29 @@ const TYPE_ALIASES: Record<string, string> = {
   expense: "Expense", purchase: "Expense", debit: "Expense", withdrawal: "Expense", payment: "Expense", charge: "Expense",
   check: "Check", cheque: "Check", deposit: "Deposit", credit: "Deposit", income: "Deposit",
   transfer: "Transfer", creditcardcredit: "CreditCardCredit", refund: "CreditCardCredit", cardcredit: "CreditCardCredit",
+  // QuickBooks register wording
+  creditcardpmt: "Transfer", creditcardpayment: "Transfer", ccpayment: "Transfer", cardpayment: "Transfer",
+  billpayment: "BillPayment", billpaymentcheck: "BillPayment", billpmtcheck: "BillPayment", billpmt: "BillPayment",
 };
-const normType = (s?: string) => (s ? TYPE_ALIASES[s.toLowerCase().replace(/[^a-z]/g, "")] || s : "");
+export const normType = (s?: string) => (s ? TYPE_ALIASES[s.toLowerCase().replace(/[^a-z]/g, "")] || s : "");
+const money2 = (n: number) => "$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+/** Unpaid bills of a vendor that this payment covers: one bill with the same amount, or the oldest bills adding up to it. */
+function matchBills(c: BuildCtx, vendorId: string, vendorName: string, amt: number) {
+  const all = (c.openBills?.get(vendorId) || []).filter((b) => !c.usedBills?.has(b.id)).sort((a, b) => a.date.localeCompare(b.date));
+  const eq = (x: number) => Math.abs(x - amt) < 0.005;
+  let pick = all.filter((b) => eq(b.balance)).slice(0, 1);
+  if (!pick.length) {
+    let sum = 0;
+    for (let i = 0; i < all.length; i++) { sum = r2(sum + all[i].balance); if (eq(sum)) { pick = all.slice(0, i + 1); break; } if (sum > amt) break; }
+  }
+  if (!pick.length) {
+    if (!all.length) throw new Error(`${vendorName} has no unpaid bill in QuickBooks for this payment. Enter the bill first, or change the type to Expense.`);
+    throw new Error(`No unpaid bill of ${vendorName} matches ${money2(amt)}. Unpaid: ${all.slice(0, 4).map((b) => `${b.docNumber ? "no. " + b.docNumber + " " : ""}${money2(b.balance)}`).join(", ")}${all.length > 4 ? "…" : ""}.`);
+  }
+  pick.forEach((b) => c.usedBills?.add(b.id));
+  return pick;
+}
 
 function bankStatement(rows: Vals[], c: BuildCtx): Built {
   const v = rows[0];
@@ -184,16 +208,34 @@ function bankStatement(rows: Vals[], c: BuildCtx): Built {
   let type = normType(v.type);
   const catType = cat ? c.r.accountType(cat.value) : "";
   if (!type) type = catType === "Bank" || catType === "Credit Card" ? "Transfer" : n > 0 ? "Deposit" : v.checkNo ? "Check" : "Expense";
+  // the money direction wins: money in is never an expense, money out is never a deposit
+  if (type === "Expense" && n > 0) type = "Deposit";
+  if (type === "Deposit" && n < 0) type = "Expense";
   const memo = [v.description, v.memo].filter(Boolean).join(" — ").slice(0, 4000) || undefined;
   const base = clean({ TxnDate: v.date, PrivateNote: memo, DepartmentRef: R_(ref(c, "Department", v.location)) });
   if (type === "Transfer") {
     const [from, to] = n < 0 ? [bank, cat] : [cat, bank];
     return { entity: "Transfer", label: "Transfer", body: { ...base, Amount: amt, FromAccountRef: R_(from), ToAccountRef: R_(to) } };
   }
+  if (type === "BillPayment") {
+    const vendor = ref(c, "Name", v.payee, "Vendor");
+    if (!vendor || vendor.kind !== "Vendor") throw new Error("A bill payment needs the vendor in Payee.");
+    const bills = matchBills(c, vendor.value, vendor.name, amt);
+    const left = { v: amt };
+    return {
+      entity: "BillPayment", label: "Bill payment",
+      body: clean({
+        ...base, DepartmentRef: undefined, VendorRef: R_(vendor), PayType: "Check", TotalAmt: amt,
+        DocNumber: c.settings.useFileRefNo && v.checkNo ? v.checkNo.slice(0, 21) : undefined,
+        CheckPayment: { BankAccountRef: R_(bank), PrintStatus: "NotSet" },
+        Line: bills.map((b) => { const a = r2(Math.min(b.balance, left.v)); left.v = r2(left.v - a); return { Amount: a, LinkedTxn: [{ TxnId: b.id, TxnType: "Bill" }] }; }),
+      }),
+    };
+  }
   if (type === "Deposit") {
     return {
       entity: "Deposit", label: "Deposit",
-      body: { ...base, DepositToAccountRef: R_(bank), Line: [clean({ Amount: amt, DetailType: "DepositLineDetail", Description: v.description || undefined, DepositLineDetail: clean({ AccountRef: R_(cat), Entity: partyRef(c, v, "Customer"), ClassRef: R_(ref(c, "Class", v.className)), CheckNum: v.checkNo || undefined }) })] },
+      body: { ...base, DepositToAccountRef: R_(bank), Line: [clean({ Amount: amt, DetailType: "DepositLineDetail", Description: (v.description || v.memo || "").slice(0, 4000) || undefined, DepositLineDetail: clean({ AccountRef: R_(cat), Entity: partyRef(c, v, "Customer"), ClassRef: R_(ref(c, "Class", v.className)), CheckNum: v.checkNo || undefined }) })] },
     };
   }
   const isCheck = type === "Check";
@@ -202,7 +244,7 @@ function bankStatement(rows: Vals[], c: BuildCtx): Built {
     body: clean({
       ...base, PaymentType: isCheck ? "Check" : "Cash", AccountRef: R_(bank), EntityRef: partyRef(c, v, "Vendor"),
       DocNumber: c.settings.useFileRefNo && v.checkNo ? v.checkNo.slice(0, 21) : undefined,
-      Line: [expenseLine({ ...v, item: "" }, c, amt)],
+      Line: [expenseLine({ ...v, item: "", description: v.description || v.memo || "" }, c, amt)],
     }),
   };
 }
@@ -234,9 +276,14 @@ function statementCheck(rows: Vals[], c: BuildCtx, cc: boolean): Issue[] {
   if (v.amount == null && v.debit == null && v.credit == null) out.push({ field: "amount", level: "error", msg: "Amount is missing" });
   else if (signed(v, c, cc) === 0) out.push({ field: "amount", level: "error", msg: "Amount is 0" });
   const t = normType(v.type);
+  if (t === "BillPayment" && !cc) {
+    if (!v.payee) out.push({ field: "payee", level: "error", msg: "A bill payment needs the vendor in Payee" });
+    return out;
+  }
   if (!v.category && !(t === "Transfer" && v.bankAccount && cc)) out.push({ field: "category", level: "error", msg: "Choose an account (category) — or add a bank rule that sets it" });
-  if (t && !["Expense", "Check", "Deposit", "Transfer", "CreditCardCredit"].includes(t))
-    out.push({ field: "type", level: "error", msg: `Transaction type “${v.type}” is not understood. Use Expense, Check, Deposit, Transfer${cc ? " or CreditCardCredit" : ""}` });
+  const ok = cc ? ["Expense", "Transfer", "CreditCardCredit"] : ["Expense", "Check", "Deposit", "Transfer", "BillPayment"];
+  if (t && !ok.includes(t))
+    out.push({ field: "type", level: "error", msg: `Transaction type “${v.type}” cannot come from a ${cc ? "card" : "bank"} line here. Use ${cc ? "Expense, CreditCardCredit or Transfer" : "Expense, Check, Deposit, Transfer or Bill Payment"}.` });
   return out;
 }
 
@@ -249,16 +296,16 @@ export const ENTITIES: EntityDef[] = [
     sign: { pos: "Money in (deposit)", neg: "Money out (expense)" },
     fields: [
       D("date", "Date", ["Transaction Date", "Posting Date", "Posted Date", "Value Date", "Txn Date", "Trans Date"], { required: true }),
-      T("description", "Description", ["Details", "Narration", "Transaction Details", "Particulars", "Transaction Description", "Bank Description"], { max: 4000 }),
+      T("description", "Description", ["Details", "Narration", "Transaction Details", "Particulars", "Transaction Description", "Bank Description", "Memo", "Memo/Description", "Bank Memo"], { max: 4000 }),
       R("payee", "Payee", "Name", ["Name", "Merchant", "Vendor", "Customer", "Received From", "Paid To", "Payee Name"]),
       R("category", "Account", "Account", ["Category", "Category Account", "Expense Account", "Income Account", "GL Account", "Split", "Account Name"]),
       N("amount", "Amount", ["Transaction Amount", "Net Amount", "Amt"], { required: "one-of" }),
-      N("debit", "Debit Amount", ["Debit", "Withdrawal", "Withdrawals", "Money Out", "Paid Out", "Payments", "Debits"], { required: "one-of" }),
-      N("credit", "Credit Amount", ["Credit", "Deposit", "Deposits", "Money In", "Paid In", "Receipts", "Credits"], { required: "one-of" }),
-      T("checkNo", "Check No", ["Check Number", "Cheque No", "Check #", "Check or Slip #", "Check or Slip", "Ref No", "Reference", "Reference No", "Cheque Number"], { max: 21 }),
-      T("type", "Transaction Type", ["Type"], { options: ["Expense", "Check", "Deposit", "Transfer"] }),
+      N("debit", "Debit Amount", ["Debit", "Payment", "Payments", "Withdrawal", "Withdrawals", "Withdrawal Amount", "Money Out", "Paid Out", "Debits", "Spent"], { required: "one-of" }),
+      N("credit", "Credit Amount", ["Credit", "Deposit", "Deposits", "Deposit Amount", "Money In", "Paid In", "Receipts", "Credits", "Received"], { required: "one-of" }),
+      T("checkNo", "Check No", ["Check Number", "Cheque No", "Check #", "Check or Slip #", "Check or Slip", "Check/Serial #", "Serial #", "Check Serial", "Ref No", "Reference", "Reference No", "Cheque Number"], { max: 21 }),
+      T("type", "Transaction Type", ["Type"], { options: ["Expense", "Check", "Deposit", "Transfer", "Bill Payment"] }),
       R("bankAccount", "Bank Account", "Account", ["Bank", "Bank Account Name"], { required: true, help: "Usually the same for the whole file: pick it once on the mapping screen." }),
-      CLASS, LOCATION, MEMO,
+      CLASS, LOCATION, T("memo", "Notes", ["Private Note", "Internal Note", "Note"], { max: 4000 }),
     ],
     build: bankStatement,
     check: (rows, c) => statementCheck(rows, c, false),
@@ -269,7 +316,7 @@ export const ENTITIES: EntityDef[] = [
     sign: { pos: "A charge (money spent)", neg: "A payment or refund" },
     fields: [
       D("date", "Date", ["Transaction Date", "Posting Date", "Posted Date", "Trans Date"], { required: true }),
-      T("description", "Description", ["Details", "Merchant Description", "Transaction Details"], { max: 4000 }),
+      T("description", "Description", ["Details", "Merchant Description", "Transaction Details", "Memo", "Memo/Description"], { max: 4000 }),
       R("payee", "Payee", "Name", ["Name", "Merchant", "Vendor"]),
       N("amount", "Amount", ["Transaction Amount"], { required: "one-of" }),
       N("debit", "Charge Amount", ["Debit", "Debit Amount", "Charges", "Purchases"], { required: "one-of" }),
@@ -278,7 +325,7 @@ export const ENTITIES: EntityDef[] = [
       T("type", "Transaction Type", ["Type"], { options: ["Expense", "CreditCardCredit", "Transfer"] }),
       R("bankAccount", "Bank Account", "Account", ["Paid From Bank"], { help: "Bank account used for card payments (transfers)." }),
       R("ccAccount", "Credit Card Account", "Account", ["Card Account", "Credit Card"], { required: true, help: "Usually the same for the whole file." }),
-      CLASS, LOCATION, MEMO,
+      CLASS, LOCATION, T("memo", "Notes", ["Private Note", "Internal Note", "Note"], { max: 4000 }),
     ],
     build: cardStatement,
     check: (rows, c) => statementCheck(rows, c, true),

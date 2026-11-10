@@ -12,7 +12,7 @@ import { addToList } from "../qbo/lists";
 import { logActivity } from "../audit";
 import { entityDef, type BuildCtx } from "./entities";
 import { Resolver, norm, type Ref } from "./resolver";
-import { fillGroup, jobSettings, recount, refKinds } from "./validate";
+import { fillGroup, jobSettings, loadOpenBills, paysBills, recount, refKinds } from "./validate";
 import type { CreatedRef, JobDoc, ListKind, RowDoc } from "../types";
 
 const LOCK_MS = 90_000;
@@ -93,6 +93,7 @@ export async function postChunk(jobId: string, user: string, budgetMs = 40_000):
     const postable = [...byGroup.entries()].filter(([, rows]) => rows.every((x) => x.status === "ready" || x.status === "posting"));
 
     const ctx: BuildCtx = { r, settings, flip: !!job.flipSign, docs: new Map() };
+    if (paysBills(def, postable.flatMap(([, rows]) => rows.map((x) => x.values)))) { ctx.openBills = await loadOpenBills(job.realmId); ctx.usedBills = new Set(); }
     // payment files: look up the bills / invoices they apply to
     for (const dl of def.docLookups || []) {
       const nums = [...new Set(postable.flatMap(([, rows]) => rows.map((x) => x.values[dl.field]).filter(Boolean)))];

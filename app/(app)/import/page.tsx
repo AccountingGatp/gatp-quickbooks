@@ -75,7 +75,7 @@ export default function ImportStart() {
     if (!s.choice) return toast("error", "Choose what this sheet contains first.");
     setUpload({ sheet: s.name, done: 0, total: s.rows.length });
     try {
-      const { id } = await api("/api/jobs", { json: { entity: s.choice, fileName: file!.name, sheetName: s.name, headers: s.headers } });
+      const { id } = await api("/api/jobs", { json: { entity: s.choice, fileName: file!.name, sheetName: s.name, headers: s.headers, notes: s.notes } });
       const CH = 800;
       for (let i = 0; i < s.rows.length; i += CH) {
         await api(`/api/jobs/${id}/rows`, { json: { start: i, rows: s.rows.slice(i, i + CH) } });

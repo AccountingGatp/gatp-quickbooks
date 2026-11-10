@@ -83,6 +83,7 @@ export type JobDoc = {
   fileName?: string;
   sheetName?: string;
   headers?: string[];
+  notes?: string[]; // report title lines found above the header row
   mapping?: Record<string, string | null>; // field key -> file header
   fixed?: Record<string, string>; // field key -> same value for every row
   flipSign?: boolean; // statements / journals: positive amounts mean the opposite of the default
@@ -149,7 +150,7 @@ export type RuleDoc = {
   name: string;
   order: number;
   enabled: boolean;
-  match: { field: "description" | "payee"; op: "contains" | "starts" | "equals"; text: string; direction?: "any" | "in" | "out" };
+  match: { field: "description" | "payee"; op: "contains" | "starts" | "equals" | "number"; text: string; direction?: "any" | "in" | "out" };
   set: { account?: string; payee?: string; type?: string; className?: string; location?: string; memo?: string };
   hits?: number;
   updatedAt: Date;

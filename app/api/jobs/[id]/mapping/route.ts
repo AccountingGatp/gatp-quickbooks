@@ -34,7 +34,8 @@ export const PUT = route(async (req: Request, { params }: P) => {
     const values: Record<string, string> = {};
     for (const f of def.fields) {
       const h = mapping[f.key];
-      let v: unknown = h ? r.raw?.[h] : undefined;
+      const col = h ? (job.headers || []).indexOf(h) : -1;
+      let v: unknown = col >= 0 ? r.raw?.["c" + col] : undefined;
       if (v == null || String(v).trim() === "") v = fixed[f.key];
       if (v != null && String(v).trim() !== "") values[f.key] = typeof v === "number" ? String(Math.round(v * 1e6) / 1e6) : String(v).trim();
     }

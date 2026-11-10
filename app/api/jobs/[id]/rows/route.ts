@@ -1,7 +1,7 @@
 // Rows of an import: upload (in chunks), read a page, and edit in the review grid.
 import { jobRows, jobs } from "@/lib/db";
 import { requireSession, route } from "@/lib/http";
-import { getJob } from "@/lib/jobs";
+import { fromRaw, getJob, toRaw } from "@/lib/jobs";
 import { entityDef } from "@/lib/import/entities";
 import { groupKey, validateJob } from "@/lib/import/validate";
 import { qboLink } from "@/lib/qbo/client";
@@ -36,7 +36,7 @@ export const GET = route(async (req: Request, { params }: P) => {
   return {
     total,
     rows: rows.map(({ _id, raw, ...r }) => ({
-      ...r, ...(withRaw ? { raw } : {}),
+      ...r, ...(withRaw ? { raw: fromRaw(job.headers || [], raw) } : {}),
       ...(r.qbo && (r.status === "posted") ? { link: qboLink(r.qbo.type, r.qbo.id, { paymentType: r.qbo.paymentType, credit: r.qbo.credit }) } : {}),
     })),
   };
@@ -50,7 +50,7 @@ export const POST = route(async (req: Request, { params }: P) => {
   const { rows, start } = (await req.json()) as { rows: { sheetRow: number; data: Record<string, unknown> }[]; start: number };
   if (start + rows.length > MAX_ROWS) throw new Error(`One import can hold up to ${MAX_ROWS.toLocaleString()} rows. Split the file and import it in parts.`);
   const R = await jobRows();
-  if (rows.length) await R.insertMany(rows.map((r, i) => ({ jobId: String(job._id), idx: start + i, sheetRow: r.sheetRow, raw: r.data, values: {}, group: `r:${start + i}`, status: "pending" as const, issues: [] })), { ordered: false });
+  if (rows.length) await R.insertMany(rows.map((r, i) => ({ jobId: String(job._id), idx: start + i, sheetRow: r.sheetRow, raw: toRaw(job.headers || [], r.data || {}), values: {}, group: `r:${start + i}`, status: "pending" as const, issues: [] })), { ordered: false });
   const total = await R.countDocuments({ jobId: String(job._id) });
   await (await jobs()).updateOne({ _id: job._id }, { $set: { "counts.total": total, updatedAt: new Date() } });
   return { total };

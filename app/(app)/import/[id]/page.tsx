@@ -59,6 +59,19 @@ export default function ImportJob({ params }: { params: Promise<{ id: string }> 
     })();
   }, [id, reload, toast]);
 
+  // QuickBooks register reports name the bank account in their title line: use it when nothing is set yet
+  useEffect(() => {
+    if (!job || job.status !== "mapping" || !initial || !lists.Account?.length) return;
+    const field = job.entity === "bank-statement" ? "bankAccount" : job.entity === "card-statement" ? "ccAccount" : "";
+    if (!field || initial.fixed[field] || initial.mapping[field]) return;
+    const title = String(job.notes?.[0] || "").split("\t")[0].trim();
+    const m = title.match(/^(\d[\d.-]*)\s+(.+)$/);
+    const low = (x: string) => x.toLowerCase().replace(/\s+/g, " ").trim();
+    const hit = title && lists.Account.find((a) => (m && a.number === m[1] && low(a.name.split(":").pop()!) === low(m[2])) || low(a.name) === low(m ? m[2] : title))
+      || (m && lists.Account.filter((a) => a.number === m[1]).length === 1 ? lists.Account.find((a) => a.number === m[1]) : undefined);
+    if (hit) setInitial({ ...initial, fixed: { ...initial.fixed, [field]: hit.name } });
+  }, [job, initial, lists]);
+
   const def = useMemo(() => (job ? CAT.find((e) => e.key === job.entity) : null), [job]);
   // grid columns: anything mapped, filled or needed; a value typed once for every row is shown above the grid instead
   const fixedOnly = useMemo(() => def && job ? def.fields.filter((f) => job.fixed?.[f.key] && !job.mapping?.[f.key]) : [], [def, job]);
@@ -70,7 +83,7 @@ export default function ImportJob({ params }: { params: Promise<{ id: string }> 
     try {
       const r = await api(`/api/jobs/${id}/mapping`, { method: "PUT", json: m });
       await reload(); setRemap(false); setRefresh((x) => x + 1);
-      toast(r.counts.error ? "info" : "ok", r.counts.error ? `${plural(r.counts.error, "row")} need fixing before they can be posted.` : `All ${plural(r.counts.ready, "row")} are ready.`);
+      toast(r.counts.error ? "info" : "ok", r.counts.error ? `${plural(r.counts.error, "row")} need fixing before they can be posted.` : (r.counts.ready === 1 ? "The row is ready." : `All ${plural(r.counts.ready, "row")} are ready.`));
     } catch (e) { toast("error", (e as Error).message); } finally { setBusy(""); }
   }
   async function recheck(fresh: boolean) {
