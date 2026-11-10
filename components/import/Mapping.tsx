@@ -9,15 +9,16 @@ import { RefLists, accountListId, type Lists } from "./RefLists";
 
 export type MappingState = { entity: string; mapping: Record<string, string | null>; fixed: Record<string, string>; flipSign: boolean; settings: ImportSettings };
 
-export function Mapping({ cat, headers, samples, initial, saved, lists, busy, onSubmit, onCancel }: {
-  cat: CatalogEntity[]; headers: string[]; samples: Record<string, unknown>[]; initial: MappingState;
+export function Mapping({ cat, headers, samples, initial, saved, lists, busy, onSubmit, onCancel, notice }: {
+  cat: CatalogEntity[]; headers: string[]; samples: Record<string, unknown>[]; initial: MappingState; notice?: React.ReactNode;
   saved: { updatedBy: string; updatedAt: string } | null; lists: Lists; busy: boolean;
   onSubmit: (m: MappingState) => void; onCancel?: () => void;
 }) {
   const [m, setM] = useState<MappingState>(initial);
   const [more, setMore] = useState(false);
   const def = cat.find((e) => e.key === m.entity)!;
-  useEffect(() => setM(initial), [initial]);
+  const initKey = JSON.stringify(initial);
+  useEffect(() => setM(initial), [initKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const changeEntity = (key: string) => {
     const d = cat.find((e) => e.key === key)!;
@@ -35,6 +36,15 @@ export function Mapping({ cat, headers, samples, initial, saved, lists, busy, on
   const oneOf = def.fields.filter((f) => f.required === "one-of");
   const oneOfMissing = oneOf.length > 0 && !oneOf.some((f) => m.mapping[f.key] || m.fixed[f.key]);
 
+  // a bank / card account field matched to a column of categories (e.g. a register's "Account" column)
+  const wrongType = (f: CatalogEntity["fields"][number], samples: string[]) => {
+    if (f.ref !== "Account" || !f.accountTypes?.length || !samples.length || !lists.Account?.length) return "";
+    const low = (x: string) => x.toLowerCase().replace(/\s+/g, " ").trim();
+    const strip = (x: string) => low(x).split(":").map((p) => p.replace(/^\d[\d.-]*\s+/, "")).join(":");
+    const bad = samples.map((v) => lists.Account.find((a) => low(a.name) === strip(v) || low(a.name.split(":").pop()!) === strip(v).split(":").pop()))
+      .filter((a): a is NonNullable<typeof a> => !!a && !!a.type && !f.accountTypes!.includes(a.type));
+    return bad.length ? `This column holds ${bad[0].type} accounts like “${bad[0].name}”, not ${f.accountTypes.join(" / ")} accounts. Choose “Not in the file” and pick the account on the right.` : "";
+  };
   const row = (f: CatalogEntity["fields"][number]) => {
     const h = m.mapping[f.key];
     const s = sample(h);
@@ -56,6 +66,7 @@ export function Mapping({ cat, headers, samples, initial, saved, lists, busy, on
             {headers.map((x) => <option key={x} value={x}>{x}{used.has(x) && x !== h ? "  (used)" : ""}</option>)}
           </select>
           {s.length > 0 && <div className="mt-1 truncate text-[12px] text-ink-3" title={s.join(", ")}>e.g. {s.join(", ")}</div>}
+          {wrongType(f, s) && <div className="mt-1 text-[12px] text-red">{wrongType(f, s)}</div>}
         </td>
         <td className="px-4 py-2.5">
           <input className="field" list={dlId} placeholder={h ? "Used when the cell is empty" : f.type === "ref" ? `Same ${f.label.toLowerCase()} for every row` : "Same value for every row"}
@@ -69,6 +80,8 @@ export function Mapping({ cat, headers, samples, initial, saved, lists, busy, on
   const set = (k: keyof ImportSettings, v: ImportSettings[keyof ImportSettings]) => setM({ ...m, settings: { ...m.settings, [k]: v } });
 
   return (
+    <>
+    {notice}
     <div className="grid gap-5 xl:grid-cols-[1fr_320px]">
       <RefLists lists={lists} />
       <Panel pad={false} title="Match your columns" actions={saved
@@ -152,6 +165,7 @@ export function Mapping({ cat, headers, samples, initial, saved, lists, busy, on
         </div>
       </aside>
     </div>
+    </>
   );
 }
 

@@ -1,5 +1,5 @@
 "use client";
-import { use, useCallback, useEffect, useMemo, useState } from "react";
+import { use, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import * as XLSX from "xlsx";
@@ -54,25 +54,36 @@ export default function ImportJob({ params }: { params: Promise<{ id: string }> 
           if (m.mapping) { setSaved(m.mapping); st = { entity: j.entity, mapping: { ...autoMap(def.fields, j.headers), ...m.mapping.mapping }, fixed: m.mapping.fixed || {}, flipSign: m.mapping.flipSign, settings: { ...DEFAULT_SETTINGS, ...(j.settings || {}) } }; }
           else st = { entity: j.entity, mapping: autoMap(def.fields, j.headers), fixed: {}, flipSign: !!j.flipSign, settings: { ...DEFAULT_SETTINGS, ...(j.settings || {}) } };
         }
-        setInitial(st);
+        setInitial(st); // the register title is applied by withTitle() when the screen is shown
       } catch (e) { toast("error", (e as Error).message); }
     })();
   }, [id, reload, toast]);
 
-  // QuickBooks register reports name the bank account in their title line: use it when nothing is set yet
-  useEffect(() => {
-    if (!job || job.status !== "mapping" || !initial || !lists.Account?.length) return;
-    const field = job.entity === "bank-statement" ? "bankAccount" : job.entity === "card-statement" ? "ccAccount" : "";
-    if (!field || initial.fixed[field] || initial.mapping[field]) return;
-    const title = String(job.notes?.[0] || "").split("\t")[0].trim();
-    const m = title.match(/^(\d[\d.-]*)\s+(.+)$/);
+  // QuickBooks register reports: every line belongs to the account named in the title line
+  // ("10004 Truist Checking 6638"). That account is the bank account, never a column of the file.
+  const regTitle = job ? registerTitle(job) : "";
+  const regField = job?.entity === "bank-statement" ? "bankAccount" : job?.entity === "card-statement" ? "ccAccount" : "";
+  const regWant = regField === "ccAccount" ? "Credit Card" : "Bank";
+  const regMatch = useMemo(() => {
+    if (!regTitle || !regField || !lists.Account?.length) return null;
+    const m = regTitle.match(/^(\d[\d.-]*)\s+(.+)$/);
     const low = (x: string) => x.toLowerCase().replace(/\s+/g, " ").trim();
-    const want = field === "bankAccount" ? "Bank" : "Credit Card";
-    const accts = lists.Account.filter((a) => a.type === want);
-    const hit = title && accts.find((a) => (m && a.number === m[1] && low(a.name.split(":").pop()!) === low(m[2])) || low(a.name) === low(m ? m[2] : title))
-      || (m && accts.filter((a) => a.number === m[1]).length === 1 ? accts.find((a) => a.number === m[1]) : undefined);
-    if (hit) setInitial({ ...initial, fixed: { ...initial.fixed, [field]: hit.name } });
-  }, [job, initial, lists]);
+    const name = low(m ? m[2] : regTitle);
+    const same = lists.Account.filter((a) => low(a.name.split(":").pop()!) === name || low(a.name) === low(regTitle) || (m && a.number === m[1]));
+    return { hit: same.find((a) => a.type === regWant), other: same.find((a) => a.type !== regWant) };
+  }, [regTitle, regField, regWant, lists]);
+  const withTitle = useCallback((st: MappingState): MappingState => {
+    if (!regTitle || !regField || st.entity !== job?.entity) return st;
+    // found in QuickBooks: always that account. Not found: keep a bank account the user picked, else show the title.
+    const name = regMatch?.hit?.name || st.fixed[regField] || regTitle;
+    return { ...st, mapping: { ...st.mapping, [regField]: null }, fixed: { ...st.fixed, [regField]: name } };
+  }, [regTitle, regField, regMatch, job?.entity]);
+  const regNotice = regTitle && regField ? (
+    regMatch === null ? null
+    : regMatch.hit ? <Notice tone="green">This is the QuickBooks register of <b>{regTitle}</b>. Every line is posted to the bank account <b>{regMatch.hit.name}</b>. The file’s Account column is the other side of each line (Undeposited Funds, Bank Fees, …).</Notice>
+    : regMatch.other ? <Notice tone="red">This is the register of <b>{regTitle}</b>, but in {job.companyName} “{regMatch.other.name}” is {/^[aeiou]/i.test(regMatch.other.type || "") ? "an" : "a"} {regMatch.other.type} account, not {regWant === "Bank" ? "a Bank" : "a Credit Card"} account. Change its type in QuickBooks, or pick the {regWant.toLowerCase()} account for these lines on the right.</Notice>
+    : <Notice tone="amber" action={<Button size="sm" onClick={() => api(`/api/lists?fresh=1`).then(setLists)}>Re-read accounts</Button>}>This is the QuickBooks register of <b>{regTitle}</b>, but {job.companyName} has no {regWant.toLowerCase()} account with that name or number. Create it in QuickBooks (Chart of accounts → New → {regWant}), then click Re-read accounts. Or pick the {regWant.toLowerCase()} account these lines belong to.</Notice>
+  ) : null;
 
   const def = useMemo(() => (job ? CAT.find((e) => e.key === job.entity) : null), [job]);
   // grid columns: anything mapped, filled or needed; a value typed once for every row is shown above the grid instead
@@ -175,7 +186,7 @@ export default function ImportJob({ params }: { params: Promise<{ id: string }> 
 
       {/* step 2: columns */}
       {(st === "mapping" || remap) && initial && (
-        <Mapping cat={CAT} headers={job.headers} samples={samples} initial={remap && job.mapping ? { entity: job.entity, mapping: job.mapping, fixed: job.fixed || {}, flipSign: !!job.flipSign, settings: { ...DEFAULT_SETTINGS, ...job.settings } } : initial}
+        <Mapping cat={CAT} headers={job.headers} samples={samples} notice={regNotice} initial={withTitle(remap && job.mapping ? { entity: job.entity, mapping: job.mapping, fixed: job.fixed || {}, flipSign: !!job.flipSign, settings: { ...DEFAULT_SETTINGS, ...job.settings } } : initial)}
           saved={st === "mapping" ? saved : null} lists={lists} busy={busy === "map"} onSubmit={applyMapping} onCancel={remap ? () => setRemap(false) : undefined} />
       )}
       {(st === "mapping" && !initial) && <div className="py-20 text-center"><Spinner /></div>}
@@ -325,6 +336,25 @@ function Banner({ tone, icon, title, text }: { tone: "green" | "amber" | "red" |
   return (
     <div className={cx("mb-4 flex items-start gap-3 rounded-[var(--radius-md)] border px-4 py-3", t)}>
       {icon}<div><div className="text-[14.5px] font-semibold text-ink">{title}</div><div className="text-[13px] text-ink-2">{text}</div></div>
+    </div>
+  );
+}
+
+/** The account a QuickBooks register report belongs to, from its title line ("10004 Truist Checking 6638 … Bank Balance: …"). */
+function registerTitle(job: Job): string {
+  const line = String(job.notes?.[0] || "");
+  const hdr = (job.headers || []).map((h: string) => h.toLowerCase());
+  if (!/balance/i.test(line) || !hdr.includes("account")) return "";
+  return line.split("\t")[0].trim();
+}
+function Notice({ tone, children, action }: { tone: "green" | "amber" | "red"; children: ReactNode; action?: ReactNode }) {
+  const t = { green: "border-green-line bg-green-soft", amber: "border-amber-line bg-amber-soft", red: "border-red-line bg-red-soft" }[tone];
+  const I = tone === "green" ? CheckCircle2 : AlertTriangle;
+  return (
+    <div className={cx("mb-4 flex items-start gap-3 rounded-[var(--radius-md)] border px-4 py-3 text-[13.5px] text-ink-2 [&_b]:font-semibold [&_b]:text-ink", t)}>
+      <I className={cx("mt-0.5 size-4 shrink-0", tone === "green" ? "text-green" : tone === "amber" ? "text-amber" : "text-red")} />
+      <div className="flex-1">{children}</div>
+      {action}
     </div>
   );
 }

@@ -24,6 +24,12 @@ export const PUT = route(async (req: Request, { params }: P) => {
   const fixed: Record<string, string> = {};
   for (const f of def.fields) { const v = String(body.fixed?.[f.key] ?? "").trim(); if (v) fixed[f.key] = v; }
   if (!def.fields.some((f) => mapping[f.key])) throw new Error("Match at least one column to a field.");
+  // a bank / card account can never come from the same column as the line's account (category)
+  for (const f of def.fields) {
+    if (!f.accountTypes || !mapping[f.key]) continue;
+    const clash = def.fields.find((g) => g.key !== f.key && g.ref === "Account" && !g.accountTypes && mapping[g.key] === mapping[f.key]);
+    if (clash) throw new Error(`The “${mapping[f.key]}” column can’t be both ${f.label} and ${clash.label}. In a QuickBooks register it is the other side of each line; set ${f.label} to “Not in the file” and pick the account on the right.`);
+  }
   const settings = { ...DEFAULT_SETTINGS, ...(job.settings || {}), ...(body.settings || {}) };
 
   // compute every row's values from the file
