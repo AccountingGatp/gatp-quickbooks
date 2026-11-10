@@ -62,7 +62,11 @@ export class Resolver {
       const parsed = segs.map((x) => { const mm = x.match(/^(\d[\d.-]*)\s+[-–]?\s*(.+)$/); return mm ? { num: mm[1], name: mm[2].trim() } : { num: "", name: x }; });
       const fullNoNum = parsed.map((x) => x.name).join(":");
       const last = parsed[parsed.length - 1];
-      hit = m.get(fullNoNum);
+      if (last.num && this.settings.matchAccountByNumber) {
+        const exact = this.list("Account").filter((a) => a.number === last.num && norm(a.name) === last.name);
+        if (exact.length === 1) hit = exact[0];
+      }
+      if (!hit) hit = m.get(fullNoNum);
       if (!hit && segs.length === 1 && last.name !== v) hit = m.get(last.name);
       if (!hit && this.settings.matchAccountByNumber) {
         if (/^\d[\d.-]*$/.test(v)) hit = m.get("#" + v);

@@ -281,6 +281,12 @@ function statementCheck(rows: Vals[], c: BuildCtx, cc: boolean): Issue[] {
     return out;
   }
   if (!v.category && !(t === "Transfer" && v.bankAccount && cc)) out.push({ field: "category", level: "error", msg: "Choose an account (category) — or add a bank rule that sets it" });
+  // QuickBooks refuses a plain deposit "from" Undeposited Funds (it answers "Select a bank account for this deposit"):
+  // money leaves Undeposited Funds only by linking the customer payments waiting there.
+  const catHit = v.category ? c.r.find("Account", v.category) : null;
+  const moneyIn = !cc && (v.amount != null || v.debit != null || v.credit != null) && signed(v, c, cc) > 0;
+  if (catHit?.item?.subType === "UndepositedFunds" && moneyIn && t !== "Transfer")
+    out.push({ field: "category", level: "error", msg: `QuickBooks won’t post a bank deposit from “${catHit.name}”: that account only empties by linking the customer payments waiting in it. Choose the account this money really comes from (an income or clearing account).` });
   const ok = cc ? ["Expense", "Transfer", "CreditCardCredit"] : ["Expense", "Check", "Deposit", "Transfer", "BillPayment"];
   if (t && !ok.includes(t))
     out.push({ field: "type", level: "error", msg: `Transaction type “${v.type}” cannot come from a ${cc ? "card" : "bank"} line here. Use ${cc ? "Expense, CreditCardCredit or Transfer" : "Expense, Check, Deposit, Transfer or Bill Payment"}.` });

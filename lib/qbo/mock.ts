@@ -227,6 +227,12 @@ async function create(realmId: string, entity: string, body: any) {
     const it = l.SalesItemLineDetail?.ItemRef || l.ItemBasedExpenseLineDetail?.ItemRef;
     if (it && !(await refExists(realmId, it))) throw fault("Invalid Reference Id", `Item ${it.value} not found`);
   }
+  if (entity === "Deposit") {
+    for (const l of body.Line || []) {
+      const a = l.DepositLineDetail?.AccountRef?.value && (await s.findOne({ realmId, entity: "Account", Id: String(l.DepositLineDetail.AccountRef.value) }));
+      if (a?.data.AccountSubType === "UndepositedFunds" && !l.LinkedTxn?.length) throw fault("A business validation error has occurred while processing your request", "Business Validation Error: Select a bank account for this deposit.");
+    }
+  }
   if (entity === "JournalEntry") {
     const lines: any[] = body.Line || [];
     const dr = lines.filter((l) => l.JournalEntryLineDetail?.PostingType === "Debit").reduce((x, l) => x + l.Amount, 0);
