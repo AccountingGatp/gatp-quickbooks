@@ -85,7 +85,7 @@ export default function ImportJob({ params }: { params: Promise<{ id: string }> 
   const regNotice = regTitle && regField ? (
     regMatch === null ? null
     : regMatch.hit ? <Notice tone="green">This is the QuickBooks register of <b>{regTitle}</b>. Every line is posted to the bank account <b>{regMatch.hit.name}</b>. The file’s Account column is the other side of each line (Undeposited Funds, Bank Fees, …).</Notice>
-    : regMatch.other ? <Notice tone="red">This is the register of <b>{regTitle}</b>, but in {job.companyName} “{regMatch.other.name}” is {/^[aeiou]/i.test(regMatch.other.type || "") ? "an" : "a"} {regMatch.other.type} account, not {regWant === "Bank" ? "a Bank" : "a Credit Card"} account. Change its type in QuickBooks, or pick the {regWant.toLowerCase()} account for these lines on the right.</Notice>
+    : regMatch.other ? <Notice tone="red">This is the register of <b>{regTitle}</b>, but in {job.companyName} “{regMatch.other.name}” is {/^[aeiou]/i.test(regMatch.other.type || "") ? "an" : "a"} {regMatch.other.type} account, not {regWant === "Bank" ? "a Bank" : "a Credit Card"} account. Change its type in QuickBooks, or pick the {regWant.toLowerCase()} account for these lines under “Values not supplied by file columns”.</Notice>
     : <Notice tone="amber" action={<Button size="sm" onClick={() => api(`/api/lists?fresh=1`).then(setLists)}>Re-read accounts</Button>}>This is the QuickBooks register of <b>{regTitle}</b>, but {job.companyName} has no {regWant.toLowerCase()} account with that name or number. Create it in QuickBooks (Chart of accounts → New → {regWant}), then click Re-read accounts. Or pick the {regWant.toLowerCase()} account these lines belong to.</Notice>
   ) : null;
 
@@ -223,7 +223,7 @@ export default function ImportJob({ params }: { params: Promise<{ id: string }> 
       {job.operation === "update" && <Notice tone="amber">Update existing records in <b>{job.companyName}</b>. Every product/service line of a matched invoice or credit memo is replaced by this file. Existing IDs are preserved; paid/applied, taxable and complex records are blocked. Undo restores the saved original if no one has edited it since.</Notice>}
       {/* step 2: columns */}
       {(st === "mapping" || remap) && initial && (
-        <Mapping cat={CAT} headers={job.headers} samples={samples} notice={regNotice} initial={withTitle(remap && job.mapping ? { entity: job.entity, mapping: job.mapping, fixed: job.fixed || {}, flipSign: !!job.flipSign, settings: { ...DEFAULT_SETTINGS, ...job.settings } } : initial)}
+        <Mapping cat={job.operation === "update" ? CAT.filter((e) => ["invoices", "credit-memos"].includes(e.key)) : CAT} headers={job.headers} samples={samples} notice={regNotice} initial={withTitle(remap && job.mapping ? { entity: job.entity, mapping: job.mapping, fixed: job.fixed || {}, flipSign: !!job.flipSign, settings: { ...DEFAULT_SETTINGS, ...job.settings } } : initial)}
           saved={st === "mapping" ? saved : null} lists={lists} busy={busy === "map"} onSubmit={applyMapping} onCancel={remap ? () => setRemap(false) : undefined} />
       )}
       {(st === "mapping" && !initial) && <div className="py-20 text-center"><Spinner /></div>}

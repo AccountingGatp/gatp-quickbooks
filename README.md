@@ -9,6 +9,8 @@ Built with Next.js 15 (App Router), MongoDB and the QuickBooks Online Accounting
 
 ### Updates and linked bank deposits
 
+The mapping screen starts with the selected transaction/list type, then displays the worksheet's actual headers and sample values. Each column can map only to fields for that type, or be ignored. Changing type reloads that type's saved matching and resets unrelated defaults. A field can use only one source column; common values and defaults for blank cells remain available. Old saved mappings are restricted to the selected type and actual worksheet headers before use.
+
 - Choose **Update existing invoices / credit memos** on Import, or upload a sheet named `Modify - Invoices`. Updates match an exported QuickBooks ID (preferred), or a unique document number and customer. Include the complete set of product/service lines: these replace the existing lines. Unmapped headers are preserved. Paid/applied, taxed and complex documents are blocked. Validation freezes the target version; changed records must be reviewed again through Change columns. Originals are backed up before API updates; undo restores them only if the returned version is still current.
 - Exported invoice/credit memo files now include `SyncToken` and re-importable customer/line columns. Create mode blocks existing IDs to prevent accidental copies.
 - Bank deposits from Undeposited Funds accept comma-separated **Payment IDs**. Each payment must exist in the selected company, be in that account, be unused in deposits and this file, and add up exactly to the deposit. The app never guesses payment links from an equal amount.

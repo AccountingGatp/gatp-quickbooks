@@ -4,6 +4,7 @@ import { requireSession, route } from "@/lib/http";
 import { getJob } from "@/lib/jobs";
 import { entityDef } from "@/lib/import/entities";
 import { signature, statementMappingIssue } from "@/lib/import/automap";
+import { repeatedSource } from "@/lib/import/mapping";
 import { validateJob } from "@/lib/import/validate";
 import { logActivity } from "@/lib/audit";
 import { DEFAULT_SETTINGS, type ImportSettings } from "@/lib/types";
@@ -37,6 +38,8 @@ export const PUT = route(async (req: Request, { params }: P) => {
     const clash = def.fields.find((g) => g.key !== f.key && g.ref === "Account" && !g.accountTypes && mapping[g.key] === mapping[f.key]);
     if (clash) throw new Error(`The “${mapping[f.key]}” column can’t be both ${f.label} and ${clash.label}. In a QuickBooks register it is the other side of each line; set ${f.label} to “Not in the file” and pick the account on the right.`);
   }
+  const repeated = repeatedSource(mapping);
+  if (repeated) throw new Error(`The file column “${repeated}” is mapped more than once. Choose one ${def.label.toLowerCase()} field for each file column.`);
   const settings = { ...DEFAULT_SETTINGS, ...(job.settings || {}), ...(body.settings || {}) };
 
   // compute every row's values from the file
