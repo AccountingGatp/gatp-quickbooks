@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ChevronDown, ChevronRight, Wand2, Info } from "lucide-react";
 import { Badge, Button, Label, Panel, Toggle, cx } from "@/components/ui";
-import { autoMap, hnorm } from "@/lib/import/automap";
+import { autoMap, hnorm, statementMappingIssue } from "@/lib/import/automap";
 import type { CatalogEntity } from "@/lib/import/entities";
 import type { ImportSettings } from "@/lib/types";
 import { RefLists, accountListId, type Lists } from "./RefLists";
@@ -35,6 +35,7 @@ export function Mapping({ cat, headers, samples, initial, saved, lists, busy, on
   const missing = def.fields.filter((f) => f.required === true && !m.mapping[f.key] && !m.fixed[f.key]);
   const oneOf = def.fields.filter((f) => f.required === "one-of");
   const oneOfMissing = oneOf.length > 0 && !oneOf.some((f) => m.mapping[f.key] || m.fixed[f.key]);
+  const amountMappingIssue = statementMappingIssue(m.entity, headers, m.mapping);
 
   // a bank / card account field matched to a column of categories (e.g. a register's "Account" column)
   const wrongType = (f: CatalogEntity["fields"][number], samples: string[]) => {
@@ -155,12 +156,13 @@ export function Mapping({ cat, headers, samples, initial, saved, lists, busy, on
         </Panel>
 
         <div className="panel sticky top-[72px] p-4">
+          {amountMappingIssue && <p className="mb-3 text-[13px] text-red" role="alert">{amountMappingIssue}</p>}
           {missing.length || oneOfMissing ? (
             <p className="mb-3 text-[13px] text-amber">
               Still needed: {[...missing.map((f) => f.label), ...(oneOfMissing ? [oneOf.map((f) => f.label).join(" or ")] : [])].join(", ")}. Match a column or type a value for every row.
             </p>
-          ) : <p className="mb-3 text-[13px] text-ink-3">All required fields are covered. Next, every row is checked against QuickBooks. Nothing is posted yet.</p>}
-          <Button variant="primary" size="lg" className="w-full" loading={busy} disabled={!!missing.length || oneOfMissing} onClick={() => onSubmit(m)}>Check rows</Button>
+          ) : !amountMappingIssue && <p className="mb-3 text-[13px] text-ink-3">All required fields are covered. Next, every row is checked against QuickBooks. Nothing is posted yet.</p>}
+          <Button variant="primary" size="lg" className="w-full" loading={busy} disabled={!!missing.length || oneOfMissing || !!amountMappingIssue} onClick={() => onSubmit(m)}>Check rows</Button>
           {onCancel && <Button variant="ghost" className="mt-2 w-full" onClick={onCancel}>Back to review</Button>}
         </div>
       </aside>
@@ -168,4 +170,5 @@ export function Mapping({ cat, headers, samples, initial, saved, lists, busy, on
     </>
   );
 }
+
 

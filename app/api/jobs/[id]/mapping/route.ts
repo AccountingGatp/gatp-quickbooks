@@ -3,7 +3,7 @@ import { mappings, jobRows, jobs } from "@/lib/db";
 import { requireSession, route } from "@/lib/http";
 import { getJob } from "@/lib/jobs";
 import { entityDef } from "@/lib/import/entities";
-import { signature } from "@/lib/import/automap";
+import { signature, statementMappingIssue } from "@/lib/import/automap";
 import { validateJob } from "@/lib/import/validate";
 import { logActivity } from "@/lib/audit";
 import { DEFAULT_SETTINGS, type ImportSettings } from "@/lib/types";
@@ -24,6 +24,8 @@ export const PUT = route(async (req: Request, { params }: P) => {
   const headers = new Set(job.headers || []);
   const mapping: Record<string, string | null> = {};
   for (const f of def.fields) { const h = body.mapping?.[f.key]; mapping[f.key] = h && headers.has(h) ? h : null; }
+  const amountIssue = statementMappingIssue(def.key, job.headers || [], mapping);
+  if (amountIssue) throw new Error(amountIssue);
   const fixed: Record<string, string> = {};
   for (const f of def.fields) { const v = String(body.fixed?.[f.key] ?? "").trim(); if (v) fixed[f.key] = v; }
   if (!def.fields.some((f) => mapping[f.key])) throw new Error("Match at least one column to a field.");

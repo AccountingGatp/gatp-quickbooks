@@ -10,7 +10,7 @@ import { Review } from "@/components/import/Review";
 import { RefLists, accountListId, type Lists } from "@/components/import/RefLists";
 import { api, plural, when } from "@/lib/client";
 import { catalog } from "@/lib/import/entities";
-import { autoMap } from "@/lib/import/automap";
+import { autoMap, repairStatementMapping } from "@/lib/import/automap";
 import { DEFAULT_SETTINGS, type Counts } from "@/lib/types";
 
 const CAT = catalog();
@@ -56,6 +56,7 @@ export default function ImportJob({ params }: { params: Promise<{ id: string }> 
           if (m.mapping) { setSaved(m.mapping); st = { entity: j.entity, mapping: { ...autoMap(def.fields, j.headers), ...m.mapping.mapping }, fixed: m.mapping.fixed || {}, flipSign: m.mapping.flipSign, settings: { ...DEFAULT_SETTINGS, ...(j.settings || {}) } }; }
           else st = { entity: j.entity, mapping: autoMap(def.fields, j.headers), fixed: {}, flipSign: !!j.flipSign, settings: { ...DEFAULT_SETTINGS, ...(j.settings || {}) } };
         }
+        st.mapping = repairStatementMapping(st.entity, j.headers, st.mapping);
         setInitial(st); // the register title is applied by withTitle() when the screen is shown
       } catch (e) { toast("error", (e as Error).message); }
     })();
@@ -427,3 +428,4 @@ function Problems({ groups, def, busy, onShow, onSet, onLeaveOut }: {
     </div>
   );
 }
+

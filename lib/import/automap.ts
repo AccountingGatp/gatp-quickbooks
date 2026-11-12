@@ -6,6 +6,24 @@ export const signature = (headers: string[]) => [...new Set(headers.map(hnorm).f
 
 type F = { key: string; label: string; aliases?: string[] };
 
+/** A register has two amount columns. Reusing only Deposit silently drops every payment. */
+export function repairStatementMapping(entity: string, headers: string[], input: Record<string, string | null>) {
+  if (!["bank-statement", "card-statement"].includes(entity)) return input;
+  const byNorm = new Map(headers.map((h) => [hnorm(h), h]));
+  const pair = entity === "bank-statement" ? [byNorm.get("payment"), byNorm.get("deposit")] : [byNorm.get("chargeamount") || byNorm.get("charges"), byNorm.get("paymentcreditamount") || byNorm.get("credits")];
+  if (!pair[0] || !pair[1]) return input;
+  // A real signed Amount column remains a valid explicit choice.
+  if (input.amount && !pair.includes(input.amount)) return input;
+  return { ...input, amount: null, debit: pair[0], credit: pair[1] };
+}
+
+export function statementMappingIssue(entity: string, headers: string[], input: Record<string, string | null>) {
+  const repaired = repairStatementMapping(entity, headers, input);
+  return repaired !== input && ["amount", "debit", "credit"].some((k) => repaired[k] !== input[k])
+    ? `This statement has separate money-out and money-in columns. Match “${repaired.debit}” to Debit/Charge Amount and “${repaired.credit}” to Credit Amount; leave the single Amount field empty.`
+    : null;
+}
+
 export function autoMap(fields: F[], headers: string[]): Record<string, string | null> {
   const out: Record<string, string | null> = {};
   const used = new Set<string>();
@@ -41,3 +59,4 @@ export function detectEntity(sheetName: string, headers: string[], entities: Cat
   }
   return best && best.score >= 4 ? best.key : null;
 }
+

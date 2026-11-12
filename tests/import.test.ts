@@ -7,6 +7,8 @@ import { assertCompleteResults } from "../lib/import/batches";
 import { parseDate, parseNumber } from "../lib/parse/values";
 import { readWorkbook } from "../lib/parse/file";
 import { DEFAULT_SETTINGS } from "../lib/types";
+import { autoMap, repairStatementMapping, statementMappingIssue } from "../lib/import/automap";
+import { Resolver } from "../lib/import/resolver";
 
 function context(): BuildCtx {
   return { settings: DEFAULT_SETTINGS, flip: false, docs: new Map(), r: {
@@ -21,6 +23,29 @@ test("same document number from different vendors produces separate bills", () =
   assert.notEqual(groupKey(def, rows[0], 0), groupKey(def, rows[1], 1));
   assert.equal(def.build([rows[0]], context()).body.VendorRef.value, "A");
   assert.equal(def.build([rows[1]], context()).body.Line[0].Amount, 200);
+});
+
+test("register mappings preserve both payments and deposits, including obsolete saved mappings", () => {
+  const headers = ["Date", "Payment", "Deposit", "Account", "Memo"];
+  const fresh = autoMap(entityDef("bank-statement").fields, headers);
+  assert.equal(fresh.debit, "Payment"); assert.equal(fresh.credit, "Deposit");
+  const broken = { ...fresh, amount: "Deposit", debit: null, credit: null };
+  assert(statementMappingIssue("bank-statement", headers, broken));
+  const fixed = repairStatementMapping("bank-statement", headers, broken);
+  assert.equal(fixed.amount, null); assert.equal(fixed.debit, "Payment"); assert.equal(fixed.credit, "Deposit");
+  assert.equal(statementMappingIssue("bank-statement", headers, fixed), null);
+  assert.deepEqual(repairStatementMapping("invoices", headers, broken), broken);
+  const signed = { ...fresh, amount: "Amount" };
+  assert.deepEqual(repairStatementMapping("bank-statement", [...headers, "Amount"], signed), signed);
+});
+
+test("canonical payable names resolve only when the account type is unambiguous", () => {
+  const r = new Resolver("test", DEFAULT_SETTINGS);
+  r.add("Account", { id: "1", name: "Accounts Payable (A/P)", type: "Accounts Payable", active: true });
+  assert.equal(r.find("Account", "12000 Accounts Payable")?.value, "1");
+  assert.equal(r.find("Account", "11001 Undeposited Funds"), null);
+  r.add("Account", { id: "2", name: "Trade Payables", type: "Accounts Payable", active: true });
+  assert.equal(r.find("Account", "12000 Accounts Payable"), null);
 });
 
 test("continuation lines inherit identity without mixing new vendors", () => {

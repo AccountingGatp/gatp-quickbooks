@@ -68,6 +68,12 @@ export class Resolver {
       }
       if (!hit) hit = m.get(fullNoNum);
       if (!hit && segs.length === 1 && last.name !== v) hit = m.get(last.name);
+      if (!hit) {
+        const kind = /^accounts? payable(?:\s*\(a\/?p\))?$/.test(last.name) ? "Accounts Payable"
+          : /^accounts? receivable(?:\s*\(a\/?r\))?$/.test(last.name) ? "Accounts Receivable" : null;
+        const canonical = kind ? this.list("Account").filter((a) => a.active !== false && a.type === kind) : [];
+        if (canonical.length === 1) hit = canonical[0];
+      }
       if (!hit && this.settings.matchAccountByNumber) {
         if (/^\d[\d.-]*$/.test(v)) hit = m.get("#" + v);
         if (!hit && last.num) {
