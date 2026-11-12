@@ -16,9 +16,10 @@ type Filter = "all" | "ready" | "warning" | "error" | "duplicate" | "skipped" | 
 const MONEY = new Set(["amount", "debit", "credit", "rate", "price", "cost", "openingBalance", "exchangeRate"]);
 const PAGE = 100;
 
-export function Review({ jobId, def, counts, visible, editable, onChanged, refreshKey }: {
+export function Review({ jobId, def, counts, visible, editable, onChanged, refreshKey, only, onClearOnly }: {
   jobId: string; def: CatalogEntity; counts: Counts; visible: string[]; editable: boolean;
   onChanged: (counts: Counts) => void; refreshKey: number;
+  only?: { label: string; idxs: number[] } | null; onClearOnly?: () => void;
 }) {
   const toast = useToast();
   const [filter, setFilter] = useState<Filter>("all");
@@ -34,10 +35,10 @@ export function Review({ jobId, def, counts, visible, editable, onChanged, refre
 
   useEffect(() => { const t = setTimeout(() => setQ(qLive), 300); return () => clearTimeout(t); }, [qLive]);
   const load = useCallback(async () => {
-    const r = await api<{ rows: GridRow[]; total: number }>(`/api/jobs/${jobId}/rows?filter=${filter}&offset=${page * PAGE}&limit=${PAGE}&q=${encodeURIComponent(q)}`);
+    const r = await api<{ rows: GridRow[]; total: number }>(`/api/jobs/${jobId}/rows?filter=${only ? "all" : filter}&offset=${page * PAGE}&limit=${PAGE}&q=${encodeURIComponent(q)}${only ? `&idxs=${only.idxs.join(",")}` : ""}`);
     setRows(r.rows); setTotal(r.total);
     setSel((s) => new Set([...s].filter((i) => r.rows.some((x) => x.idx === i))));
-  }, [jobId, filter, page, q]);
+  }, [jobId, filter, page, q, only]);
   useEffect(() => { load().catch((e) => toast("error", e.message)); }, [load, refreshKey, toast]);
   useEffect(() => { setPage(0); setSel(new Set()); }, [filter, q]);
 
@@ -81,6 +82,12 @@ export function Review({ jobId, def, counts, visible, editable, onChanged, refre
         </div>
       </div>
 
+      {only && (
+        <div className="flex items-center gap-2 border-t border-blue-soft bg-blue-soft px-3 py-2 text-[13px] text-blue">
+          <span className="min-w-0 flex-1 truncate">Showing {only.idxs.length} rows: {only.label}</span>
+          <button className="font-medium underline-offset-2 hover:underline" onClick={onClearOnly}>Show all rows</button>
+        </div>
+      )}
       {editable && sel.size > 0 && (
         <div className="flex flex-wrap items-center gap-2 border-y border-green-line bg-green-soft px-3 py-2 text-[13px]">
           <b className="num font-semibold text-green">{sel.size} selected</b>

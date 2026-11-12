@@ -7,7 +7,7 @@ import { Check, RefreshCw, Columns3, Download, Undo2, Trash2, Send, AlertTriangl
 import { Badge, Button, JobStatus, Modal, Progress, Spinner, cx, useToast } from "@/components/ui";
 import { Mapping, type MappingState } from "@/components/import/Mapping";
 import { Review } from "@/components/import/Review";
-import { RefLists, type Lists } from "@/components/import/RefLists";
+import { RefLists, accountListId, type Lists } from "@/components/import/RefLists";
 import { api, plural, when } from "@/lib/client";
 import { catalog } from "@/lib/import/entities";
 import { autoMap } from "@/lib/import/automap";
@@ -29,6 +29,8 @@ export default function ImportJob({ params }: { params: Promise<{ id: string }> 
   const [busy, setBusy] = useState("");
   const [refresh, setRefresh] = useState(0);
   const [confirm, setConfirm] = useState<"" | "post" | "undo" | "discard">("");
+  const [only, setOnly] = useState<{ label: string; idxs: number[] } | null>(null);
+  const [problems, setProblems] = useState<{ msg: string; field?: string; kind: string; idxs: number[] }[]>([]);
   const [run, setRun] = useState<{ kind: "post" | "undo"; start: number; target: number; counts: Counts } | null>(null);
 
   const reload = useCallback(async () => {
@@ -90,6 +92,21 @@ export default function ImportJob({ params }: { params: Promise<{ id: string }> 
   const fixedOnly = useMemo(() => def && job ? def.fields.filter((f) => job.fixed?.[f.key] && !job.mapping?.[f.key]) : [], [def, job]);
   const visible = useMemo(() => def && job ? def.fields.filter((f) => !fixedOnly.includes(f) && (job.mapping?.[f.key] || f.required === true || job.fieldsUsed?.includes(f.key)
     || (["bank-statement", "card-statement"].includes(def.key) && ["payee", "category"].includes(f.key)))).map((f) => f.key) : [], [def, job, fixedOnly]);
+
+  // grouped problems for the "What needs fixing" panel
+  useEffect(() => {
+    if (!job || !(job.counts.error + job.counts.failed)) { setProblems([]); return; }
+    api(`/api/jobs/${id}/issues`).then((r) => setProblems(r.groups)).catch(() => {});
+  }, [id, job?.counts?.error, job?.counts?.failed, refresh]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function fixGroup(idxs: number[], body: Record<string, unknown>, msg: string) {
+    setBusy("fix");
+    try {
+      const r = await api(`/api/jobs/${id}/rows`, { method: "PATCH", json: body });
+      setJob((j: Job) => ({ ...j, counts: r.counts })); setRefresh((x) => x + 1); setOnly(null);
+      toast("ok", msg);
+    } catch (e) { toast("error", (e as Error).message); } finally { setBusy(""); }
+  }
 
   async function applyMapping(m: MappingState) {
     setBusy("map");
@@ -218,7 +235,14 @@ export default function ImportJob({ params }: { params: Promise<{ id: string }> 
             </div>
           </div>
 
+          {editable && problems.length > 0 && (
+            <Problems groups={problems} def={def} busy={busy === "fix"} onShow={(g) => setOnly({ label: g.msg, idxs: g.idxs })}
+              onSet={(g, field, value) => fixGroup(g.idxs, { fill: { idxs: g.idxs, field, value } }, `${g.idxs.length} rows updated`)}
+              onLeaveOut={(g) => fixGroup(g.idxs, { skip: g.idxs }, `${g.idxs.length} rows left out`)} />
+          )}
+
           <Review jobId={id} def={def} counts={run?.counts || c} visible={visible} editable={editable} refreshKey={refresh}
+            only={only} onClearOnly={() => setOnly(null)}
             onChanged={(counts) => setJob((j: Job) => ({ ...j, counts }))} />
 
           {/* post bar */}
@@ -355,6 +379,51 @@ function Notice({ tone, children, action }: { tone: "green" | "amber" | "red"; c
       <I className={cx("mt-0.5 size-4 shrink-0", tone === "green" ? "text-green" : tone === "amber" ? "text-amber" : "text-red")} />
       <div className="flex-1">{children}</div>
       {action}
+    </div>
+  );
+}
+
+type Group = { msg: string; field?: string; kind: string; idxs: number[] };
+/** "What needs fixing": each distinct problem once, with a fix for all its rows. */
+function Problems({ groups, def, busy, onShow, onSet, onLeaveOut }: {
+  groups: Group[]; def: NonNullable<ReturnType<typeof CAT.find>>; busy: boolean;
+  onShow: (g: Group) => void; onSet: (g: Group, field: string, value: string) => void; onLeaveOut: (g: Group) => void;
+}) {
+  const [open, setOpen] = useState(true);
+  const [vals, setVals] = useState<Record<number, string>>({});
+  const total = new Set(groups.flatMap((g) => g.idxs)).size;
+  return (
+    <div className="panel mb-4 overflow-hidden">
+      <button onClick={() => setOpen(!open)} className="flex w-full items-center gap-3 px-5 py-3 text-left">
+        <AlertTriangle className="size-4 text-red" />
+        <span className="flex-1 text-[14px] font-semibold">What needs fixing <span className="ml-2 font-normal text-ink-3">{groups.length} {groups.length === 1 ? "problem" : "problems"} on {total} rows</span></span>
+        <span className="text-[12.5px] text-green">{open ? "Hide" : "Show"}</span>
+      </button>
+      {open && (
+        <ul className="border-t border-rule-2">
+          {groups.map((g, i) => {
+            const f = g.field ? def.fields.find((x) => x.key === g.field) : undefined;
+            const list = f?.type === "ref" ? (f.ref === "Account" ? accountListId(f.accountTypes) : `dl-${f.ref}`) : undefined;
+            return (
+              <li key={i} className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-rule-2 px-5 py-3 last:border-0">
+                <span className="num grid min-w-[44px] place-items-center rounded-full bg-red-soft px-2 py-0.5 text-[12.5px] font-semibold text-red">{g.idxs.length}</span>
+                <span className="min-w-[280px] flex-1 text-[13px] text-ink">{g.kind === "refused" && <b className="font-semibold text-red">QuickBooks refused: </b>}{g.msg}</span>
+                <span className="flex flex-wrap items-center gap-2">
+                  {f && (
+                    <>
+                      <span className="text-[12.5px] text-ink-3">Set {f.label} to</span>
+                      <input className="field h-8 w-[230px]" list={list} placeholder={f.type === "ref" ? "type to pick…" : "value"} value={vals[i] || ""} onChange={(e) => setVals({ ...vals, [i]: e.target.value })} />
+                      <Button size="sm" variant="primary" disabled={!vals[i]?.trim() || busy} onClick={() => onSet(g, f.key, vals[i].trim())}>Apply to {g.idxs.length}</Button>
+                    </>
+                  )}
+                  <Button size="sm" onClick={() => onShow(g)}>Show rows</Button>
+                  <Button size="sm" variant="ghost" icon={<EyeOff className="size-3.5" />} onClick={() => onLeaveOut(g)}>Leave out</Button>
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </div>
   );
 }

@@ -21,6 +21,8 @@ export const GET = route(async (req: Request, { params }: P) => {
   else if (filter === "warning") { q.status = "ready"; q["issues.level"] = "warning"; }
   else if (filter === "duplicate") q["dup.id"] = { $exists: true };
   else if (["ready", "skipped", "posted", "failed", "rolled_back"].includes(filter)) q.status = filter;
+  const only = (p.get("idxs") || "").split(",").filter(Boolean).map(Number).filter((n) => Number.isFinite(n));
+  if (only.length) q.idx = { $in: only.slice(0, 5000) };
   const search = (p.get("q") || "").trim();
   const offset = Number(p.get("offset") || 0), limit = Math.min(Number(p.get("limit") || 100), 5000);
   const R = await jobRows();
