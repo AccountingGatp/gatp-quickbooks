@@ -78,6 +78,7 @@ export type CreatedRef = { type: string; id: string; name: string };
 export type JobDoc = {
   _id: ObjectId;
   kind: JobKind;
+  operation?: "create" | "update";
   entity: string;
   entityLabel: string;
   realmId: string;
@@ -130,6 +131,8 @@ export type RowDoc = {
   dup?: { type: string; id: string; label: string };
   forceInclude?: boolean; // the user chose to post this row even though it looks like a duplicate
   qbo?: QboRef;
+  target?: { type: string; id: string; syncToken: string };
+  original?: Record<string, any>; // complete pre-update backup; never returned in row listings
   error?: string;
   requestId?: string;
   postedAt?: Date;

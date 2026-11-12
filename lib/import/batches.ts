@@ -6,7 +6,7 @@ export type PostBatchDoc = {
   jobId: string;
   realmId: string;
   ops: BatchOp[];
-  groups: { bId: string; idxs: number[] }[];
+  groups: { bId: string; idxs: number[]; original?: Record<string, any> }[];
   results?: BatchResult[];
   completed: boolean;
   createdAt: Date;

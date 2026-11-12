@@ -8,6 +8,7 @@ import { validateJob } from "@/lib/import/validate";
 import { logActivity } from "@/lib/audit";
 import { DEFAULT_SETTINGS, type ImportSettings } from "@/lib/types";
 import { lockJob, unlockJob } from "@/lib/import/post";
+import { UPDATE_TYPES } from "@/lib/import/updates";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 type P = { params: Promise<{ id: string }> };
@@ -21,6 +22,7 @@ export const PUT = route(async (req: Request, { params }: P) => {
   if (!["mapping", "review"].includes(job.status) && !nothingPosted) throw new Error("Part of this import is already in QuickBooks, so its columns can no longer change. Fix rows in the grid instead.");
   const body = (await req.json()) as { mapping: Record<string, string | null>; fixed?: Record<string, string>; flipSign?: boolean; settings?: Partial<ImportSettings>; entity?: string };
   const def = entityDef(body.entity || job.entity);
+  if (job.operation === "update" && !UPDATE_TYPES[def.key]) throw new Error("Update existing supports Invoices and Credit memos only.");
   const headers = new Set(job.headers || []);
   const mapping: Record<string, string | null> = {};
   for (const f of def.fields) { const h = body.mapping?.[f.key]; mapping[f.key] = h && headers.has(h) ? h : null; }
@@ -51,7 +53,7 @@ export const PUT = route(async (req: Request, { params }: P) => {
       if (v == null || String(v).trim() === "") v = fixed[f.key];
       if (v != null && String(v).trim() !== "") values[f.key] = typeof v === "number" ? String(Math.round(v * 1e6) / 1e6) : String(v).trim();
     }
-    ops.push({ updateOne: { filter: { _id: r._id }, update: { $set: { values, issues: [], status: r.status === "skipped" ? "skipped" : "pending" }, $unset: { error: "", requestId: "" } } } });
+    ops.push({ updateOne: { filter: { _id: r._id }, update: { $set: { values, issues: [], status: r.status === "skipped" ? "skipped" : "pending" }, $unset: { error: "", requestId: "", target: "" } } } });
     if (ops.length >= 500) { await R.bulkWrite(ops, { ordered: false }); ops = []; }
   }
   if (ops.length) await R.bulkWrite(ops, { ordered: false });

@@ -10,18 +10,20 @@ import { api, plural, when } from "@/lib/client";
 import { catalog, type CatalogEntity } from "@/lib/import/entities";
 import { detectEntity } from "@/lib/import/automap";
 import { readWorkbook, type ParsedSheet } from "@/lib/parse/file";
+import { modificationSheet, UPDATE_TYPES } from "@/lib/import/updates";
 import { unsupportedSheetAction } from "@/lib/import/grouping";
 
 const CAT = catalog();
 const GROUPS = ["Banking", "Purchases", "Sales", "Accounting", "Lists"] as const;
 const ACCEPT = ".xlsx,.xls,.xlsm,.xlsb,.ods,.csv,.tsv,.txt";
 
-type Sheet = ParsedSheet & { detected: string | null; choice: string; blocked: string | null };
+type Sheet = ParsedSheet & { detected: string | null; choice: string };
 
 export default function ImportStart() {
   const router = useRouter();
   const toast = useToast();
   const [company, setCompany] = useState<{ name: string } | null | undefined>(undefined);
+  const [operation, setOperation] = useState<"create" | "update">("create");
   const [type, setType] = useState<string>("auto");
   const [file, setFile] = useState<{ name: string; sheets: Sheet[] } | null>(null);
   const [reading, setReading] = useState(false);
@@ -53,7 +55,7 @@ export default function ImportStart() {
       setFile({
         name, sheets: sheets.map((s) => {
           const detected = detectEntity(s.name, s.headers, CAT);
-          return { ...s, detected, choice: type !== "auto" ? type : detected || "", blocked: unsupportedSheetAction(s.name) };
+          return { ...s, detected, choice: type !== "auto" ? type : detected || "" };
         }),
       });
     } catch (e) { toast("error", (e as Error).message); } finally { setReading(false); }
@@ -72,12 +74,16 @@ export default function ImportStart() {
     } catch (e) { toast("error", (e as Error).message); setReading(false); }
   }
 
+  const sheetOperation = (s: Sheet) => modificationSheet(s.name) ? "update" : operation;
+  const blockedFor = (s: Sheet) => unsupportedSheetAction(s.name, s.choice, sheetOperation(s)) || (sheetOperation(s) === "update" && !UPDATE_TYPES[s.choice] ? "Update existing supports Invoices and Credit memos only." : null);
+
   async function start(s: Sheet) {
-    if (s.blocked) return toast("error", s.blocked);
+    const blocked = blockedFor(s);
+    if (blocked) return toast("error", blocked);
     if (!s.choice) return toast("error", "Choose what this sheet contains first.");
     setUpload({ sheet: s.name, done: 0, total: s.rows.length });
     try {
-      const { id } = await api("/api/jobs", { json: { entity: s.choice, fileName: file!.name, sheetName: s.name, headers: s.headers, notes: s.notes } });
+      const { id } = await api("/api/jobs", { json: { entity: s.choice, fileName: file!.name, sheetName: s.name, headers: s.headers, notes: s.notes, operation: sheetOperation(s) } });
       const CH = 800;
       for (let i = 0; i < s.rows.length; i += CH) {
         await api(`/api/jobs/${id}/rows`, { json: { start: i, rows: s.rows.slice(i, i + CH) } });
@@ -107,7 +113,15 @@ export default function ImportStart() {
     <>
       <PageHeader icon={<Upload />} title="Import" sub={<>Upload a spreadsheet, check every line, then post it to <b className="font-semibold text-ink">{company.name}</b>.</>} />
 
-      <div className="grid gap-5 xl:grid-cols-[1fr_340px]">
+      <Panel title="Import action">
+        <label className="flex items-center gap-3 text-[13.5px]">Action
+          <select className="field max-w-[300px]" value={operation} onChange={(e) => setOperation(e.target.value as "create" | "update")}>
+            <option value="create">Create new records</option><option value="update">Update existing invoices / credit memos</option>
+          </select>
+        </label>
+        <p className="mt-2 text-[12.5px] text-ink-3">Update matches a QuickBooks ID or a unique document number and customer. Include every product/service line. Paid, applied, taxed or complex records are held back. Sheets named Modify, Update or Edit always use update mode.</p>
+      </Panel>
+      <div className="mt-5 grid gap-5 xl:grid-cols-[1fr_340px]">
         <div className="space-y-5">
           {/* file */}
           {!file ? (
@@ -134,20 +148,20 @@ export default function ImportStart() {
                 <tbody>
                   {file.sheets.map((s, i) => (
                     <tr key={s.name} className="border-b border-rule-2 last:border-0">
-                      <td className="px-4 py-2.5"><div className="font-medium">{s.name}</div><div className="max-w-[340px] truncate text-[12px] text-ink-3" title={s.headers.join(", ")}>{s.headers.slice(0, 6).join(", ")}{s.headers.length > 6 ? "…" : ""}</div>{s.blocked && <p className="mt-1 max-w-[340px] text-[12px] text-red" role="status">{s.blocked}</p>}</td>
+                      <td className="px-4 py-2.5"><div className="font-medium">{s.name}</div><div className="max-w-[340px] truncate text-[12px] text-ink-3" title={s.headers.join(", ")}>{s.headers.slice(0, 6).join(", ")}{s.headers.length > 6 ? "…" : ""}</div>{blockedFor(s) && <p className="mt-1 max-w-[340px] text-[12px] text-red" role="status">{blockedFor(s)}</p>}</td>
                       <td className="num px-4 py-2.5 text-ink-2">{s.rows.length.toLocaleString()}</td>
                       <td className="px-4 py-2.5">
                         <select className="field max-w-[230px]" value={s.choice} onChange={(e) => setFile({ ...file, sheets: file.sheets.map((x, j) => (j === i ? { ...x, choice: e.target.value } : x)) })}>
                           <option value="">Choose…</option>
                           {GROUPS.map((g) => <optgroup key={g} label={g}>{CAT.filter((e) => e.group === g).map((e) => <option key={e.key} value={e.key}>{e.label}</option>)}</optgroup>)}
                         </select>
-                        {s.detected && s.detected === s.choice && type === "auto" && <div className="mt-1 text-[11.5px] text-green">Recognised automatically</div>}
+                        {s.detected && s.detected === s.choice && type === "auto" && <div className="mt-1 text-[11.5px] text-green">Recognised automatically{sheetOperation(s) === "update" ? " · Update existing" : ""}</div>}
                         {!s.detected && type === "auto" && <div className="mt-1 text-[11.5px] text-amber">Not recognised. Pick a type, or skip this sheet.</div>}
                       </td>
                       <td className="px-4 py-2.5 text-right">
                         {upload?.sheet === s.name
                           ? <div className="w-[160px]"><Progress value={(upload.done / Math.max(1, upload.total)) * 100} live /><div className="mt-1 text-[11.5px] text-ink-3">Uploading {upload.done.toLocaleString()} of {upload.total.toLocaleString()}</div></div>
-                          : <Button variant="primary" size="sm" disabled={!s.choice || !!upload || !!s.blocked} onClick={() => start(s)}>Import this sheet <ArrowRight className="size-3.5" /></Button>}
+                          : <Button variant="primary" size="sm" disabled={!s.choice || !!upload || !!blockedFor(s)} onClick={() => start(s)}>Import this sheet <ArrowRight className="size-3.5" /></Button>}
                       </td>
                     </tr>
                   ))}

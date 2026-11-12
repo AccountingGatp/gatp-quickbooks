@@ -16,6 +16,9 @@ import { entityDef, type BuildCtx } from "./entities";
 import { Resolver, norm } from "./resolver";
 import { fillGroup, jobSettings, loadOpenBills, paysBills, recount, refKinds, validateJob } from "./validate";
 import type { CreatedRef, JobDoc, ListKind, RowDoc } from "../types";
+import { loadPaymentLinks } from "./payment-links";
+import { prepareUpdate, restoreUpdate } from "./updates";
+import { loadUpdateTargets, targetsFor } from "./update-targets";
 
 const LOCK_MS = 300_000;
 
@@ -59,6 +62,7 @@ async function renewLocks(job: JobDoc, token: string) {
 
 /** Create names that the file uses but QuickBooks does not have yet (vendors, customers, classes, …). */
 async function createMissing(job: JobDoc, r: Resolver, def: ReturnType<typeof entityDef>, rows: RowDoc[], created: CreatedRef[]) {
+  const failures = new Map<string, string>();
   const need = new Map<string, { kind: ListKind; name: string }>();
   for (const row of rows) {
     for (const f of def.fields) {
@@ -77,6 +81,7 @@ async function createMissing(job: JobDoc, r: Resolver, def: ReturnType<typeof en
       body: ["Vendor", "Customer"].includes(n.kind) ? { DisplayName: n.name.replace(/:/g, "-").slice(0, 500) } : { Name: n.name.replace(/:/g, "-").slice(0, 100) },
     }));
     const res = await batch(job.realmId, ops, requestId(String(job._id), ["names", ...part.map((p) => p.kind + p.name)]));
+    assertCompleteResults(ops, res);
     for (let j = 0; j < part.length; j++) {
       const n = part[j], x = res[j];
       if (x.ok) {
@@ -87,9 +92,11 @@ async function createMissing(job: JobDoc, r: Resolver, def: ReturnType<typeof en
       } else if (/duplicate/i.test(x.error || "")) {
         // made by someone else meanwhile (or exists as another name type): re-read and continue
         await r.load([n.kind], true);
-      }
+        if (!r.find(n.kind, n.name)) failures.set(`${n.kind}|${norm(n.name)}`, x.error || "A different name type already uses this name.");
+      } else failures.set(`${n.kind}|${norm(n.name)}`, x.error || "QuickBooks refused this name.");
     }
   }
+  return failures;
 }
 
 export type PostProgress = { done: boolean; counts: JobDoc["counts"]; status: string; message?: string };
@@ -108,7 +115,7 @@ async function finishBatch(intent: PostBatchDoc, job: JobDoc, resolver?: Resolve
     const group = intent.groups.find((x) => x.bId === res.bId)!;
     const e = res.entity || {};
     await R.updateMany({ jobId: intent.jobId, idx: { $in: group.idxs } }, res.ok ? {
-      $set: { status: "posted", postedAt: new Date(), qbo: { type: op.entity, id: String(e.Id), docNumber: e.DocNumber, syncToken: e.SyncToken, total: Number(e.TotalAmt ?? e.Amount ?? 0), paymentType: e.PaymentType, credit: !!e.Credit } },
+      $set: { status: "posted", postedAt: new Date(), ...(group.original ? { original: group.original } : {}), qbo: { type: op.entity, id: String(e.Id), docNumber: e.DocNumber, syncToken: e.SyncToken, total: Number(e.TotalAmt ?? e.Amount ?? 0), paymentType: e.PaymentType, credit: !!e.Credit } },
       $unset: { error: "" },
     } : { $set: { status: "failed", error: res.error } });
     if (res.ok && entityDef(job.entity).list && resolver) {
@@ -128,7 +135,7 @@ export async function postChunk(jobId: string, user: string, budgetMs = 40_000):
   let companyLock: string | undefined;
   try {
     companyLock = await lockCompany(job.realmId);
-    const unsupported = unsupportedSheetAction(job.sheetName || "");
+    const unsupported = unsupportedSheetAction(job.sheetName || "", job.entity, job.operation);
     if (unsupported) throw new Error(unsupported);
     if (!["review", "posting", "partial", "failed"].includes(job.status)) throw new Error("This import cannot be posted in its current state.");
     // Older interrupted imports have no durable payload, so cannot be safely reconstructed.
@@ -158,6 +165,9 @@ export async function postChunk(jobId: string, user: string, budgetMs = 40_000):
     for (const row of all) byGroup.set(row.group, [...(byGroup.get(row.group) || []), row]);
     const postable = [...byGroup.entries()].filter(([, rows]) => rows.every((x) => x.status === "ready"));
     const ctx: BuildCtx = { r, settings, flip: !!job.flipSign, docs: new Map() };
+    await loadPaymentLinks(job.realmId, postable.flatMap(([, rows]) => rows.map((x) => x.values)), ctx);
+    const targets = job.operation === "update" ? await loadUpdateTargets(job.realmId, def.key, postable.flatMap(([, rows]) => rows.map((x) => x.values))) : [];
+    const usedTargets = new Set<string>();
     if (paysBills(def, postable.flatMap(([, rows]) => rows.map((x) => x.values)))) { ctx.openBills = await loadOpenBills(job.realmId); ctx.usedBills = new Set(); }
     for (const dl of def.docLookups || []) {
       const nums = [...new Set(postable.flatMap(([, rows]) => rows.map((x) => x.values[dl.field]).filter(Boolean)))];
@@ -174,16 +184,34 @@ export async function postChunk(jobId: string, user: string, budgetMs = 40_000):
     while (cursor < postable.length && Date.now() - started < budgetMs) {
       const chunk = postable.slice(cursor, cursor + 30);
       cursor += chunk.length;
-      await createMissing(job, r, def, chunk.flatMap(([, rows]) => rows), created);
+      const nameFailures = await createMissing(job, r, def, chunk.flatMap(([, rows]) => rows), created);
       await renewLocks(job, companyLock);
       await J.updateOne({ _id: id, lockToken: job.lockToken }, { $set: { created, lockUntil: Date.now() + LOCK_MS } });
       const ops: BatchOp[] = [], groups: PostBatchDoc["groups"] = [];
       for (let j = 0; j < chunk.length; j++) {
         const [, rows] = chunk[j];
         try {
+          // A failed name creation must not leak placeholder IDs into a QuickBooks transaction.
+          for (const row of rows) for (const f of def.fields) if (f.type === "ref" && f.ref && row.values[f.key]) {
+            const prefer = f.prefer || (def.key === "deposits" || def.group === "Sales" ? "Customer" : "Vendor");
+            const hit = r.find(f.ref, row.values[f.key], prefer);
+            if (!hit || hit.isNew) {
+              const kind = f.ref === "Name" ? prefer : f.ref;
+              throw new Error(`QuickBooks could not create or resolve ${f.label} “${row.values[f.key]}”: ${nameFailures.get(`${kind}|${norm(row.values[f.key])}`) || "Check the company's tracking settings and check the rows again."}`);
+            }
+          }
           const built = def.build(fillGroup(def, rows.map((x) => x.values)), ctx);
-          ops.push({ bId: String(j), operation: "create", entity: built.entity, body: built.body });
-          groups.push({ bId: String(j), idxs: rows.map((x) => x.idx) });
+          if (job.operation === "update") {
+            const u = prepareUpdate(built, targetsFor(targets, rows[0].values), rows[0].target, rows[0].values.syncToken);
+            if (!rows[0].target) throw new Error("Check and review the update target before posting.");
+            if (usedTargets.has(u.target.id)) throw new Error("The same QuickBooks record is targeted more than once in this file.");
+            usedTargets.add(u.target.id);
+            ops.push({ bId: String(j), operation: "update", entity: built.entity, body: u.body });
+            groups.push({ bId: String(j), idxs: rows.map((x) => x.idx), original: u.before });
+          } else {
+            ops.push({ bId: String(j), operation: "create", entity: built.entity, body: built.body });
+            groups.push({ bId: String(j), idxs: rows.map((x) => x.idx) });
+          }
         } catch (e) {
           await Rw.updateMany({ jobId, idx: { $in: rows.map((x) => x.idx) } }, { $set: { status: "failed", error: (e as Error).message } });
         }
@@ -225,10 +253,10 @@ export async function rollbackChunk(jobId: string, user: string, budgetMs = 40_0
     if (await (await postBatches()).countDocuments({ jobId, completed: false })) throw new Error("Resume posting first to recover the outstanding QuickBooks response before undoing this import.");
     const posted = await Rw.find({ jobId, status: "posted", qbo: { $exists: true } }).sort({ idx: 1 }).toArray();
     // one QuickBooks record may cover several rows
-    const recs = new Map<string, { type: string; id: string; syncToken?: string; idxs: number[] }>();
+    const recs = new Map<string, { type: string; id: string; syncToken?: string; idxs: number[]; original?: Record<string, any> }>();
     for (const row of posted) {
       const k = `${row.qbo!.type}|${row.qbo!.id}`;
-      const cur = recs.get(k) || { type: row.qbo!.type, id: row.qbo!.id, syncToken: row.qbo!.syncToken, idxs: [] };
+      const cur = recs.get(k) || { type: row.qbo!.type, id: row.qbo!.id, syncToken: row.qbo!.syncToken, idxs: [], original: row.original };
       cur.idxs.push(row.idx);
       recs.set(k, cur);
     }
@@ -237,7 +265,10 @@ export async function rollbackChunk(jobId: string, user: string, budgetMs = 40_0
     for (let i = 0; i < list.length && Date.now() - started < budgetMs; i += 30) {
       await renewLocks(job, companyLock);
       const part = list.slice(i, i + 30);
-      const run = async (items: typeof part) => batch(job.realmId, items.map((x, j) => LIST_TYPES.has(x.type)
+      if (job.operation === "update" && part.some((x) => !x.original || x.syncToken == null)) throw new Error("The update backup or returned version is missing. Restore this record manually; automatic deletion is blocked.");
+      const run = async (items: typeof part) => batch(job.realmId, items.map((x, j) => x.original
+        ? { bId: String(j), operation: "update" as const, entity: x.type, body: restoreUpdate(x.original, x.id, x.syncToken!) }
+        : LIST_TYPES.has(x.type)
         ? { bId: String(j), operation: "update" as const, entity: x.type, body: { Id: x.id, SyncToken: x.syncToken || "0", sparse: true, Active: false } }
         : { bId: String(j), operation: "delete" as const, entity: x.type, body: { Id: x.id, SyncToken: x.syncToken || "0" } }));
       const res = await run(part);

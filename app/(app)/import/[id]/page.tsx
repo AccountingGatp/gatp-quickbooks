@@ -76,6 +76,7 @@ export default function ImportJob({ params }: { params: Promise<{ id: string }> 
     return { hit: same.find((a) => a.type === regWant), other: same.find((a) => a.type !== regWant) };
   }, [regTitle, regField, regWant, lists]);
   const withTitle = useCallback((st: MappingState): MappingState => {
+    st = { ...st, mapping: repairStatementMapping(st.entity, job?.headers || [], st.mapping) };
     if (!regTitle || !regField || st.entity !== job?.entity) return st;
     // found in QuickBooks: always that account. Not found: keep a bank account the user picked, else show the title.
     const name = regMatch?.hit?.name || st.fixed[regField] || regTitle;
@@ -157,6 +158,23 @@ export default function ImportJob({ params }: { params: Promise<{ id: string }> 
     catch (e) { toast("error", (e as Error).message); }
   }
 
+  async function downloadMissingProducts() {
+    setBusy("products");
+    try {
+      const names = new Set<string>();
+      for (let offset = 0; ; offset += 5000) {
+        const page = await api(`/api/jobs/${id}/rows?filter=error&limit=5000&offset=${offset}`);
+        for (const row of page.rows) if (row.values.item && row.issues.some((i: any) => i.field === "item" && /not found/.test(i.msg))) names.add(row.values.item);
+        if (offset + page.rows.length >= page.total || !page.rows.length) break;
+      }
+      if (!names.size) return toast("info", "No missing products/services were found in the validation errors.");
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet([...names].sort().map((name) => ({ Name: name, Type: "", "Income Account": "", Description: "" }))), "Items");
+      XLSX.writeFile(wb, "Missing-products-setup.xlsx");
+      toast("info", "Fill the correct Type and Income Account for each item, then import the Items sheet before checking these invoices again.");
+    } catch (e) { toast("error", (e as Error).message); } finally { setBusy(""); }
+  }
+
   async function downloadResults() {
     setBusy("dl");
     try {
@@ -168,7 +186,7 @@ export default function ImportJob({ params }: { params: Promise<{ id: string }> 
       }
       const label: Record<string, string> = { posted: "Posted", failed: "Refused by QuickBooks", error: "Needs fixing", ready: "Ready (not posted)", skipped: "Left out", rolled_back: "Undone", pending: "Not checked" };
       const data = all.map((r) => ({
-        Row: r.sheetRow, Result: label[r.status] || r.status, "QuickBooks type": r.qbo?.type || "", "QuickBooks ID": r.qbo?.id || "",
+        Row: r.sheetRow, Action: job.operation || "create", "QuickBooks ID": r.qbo?.id || r.target?.id || "", SyncToken: r.qbo?.syncToken || r.target?.syncToken || "", Result: label[r.status] || r.status, "QuickBooks type": r.qbo?.type || r.target?.type || "",
         Problems: [r.error, ...(r.issues || []).map((i: any) => i.msg)].filter(Boolean).join("; "),
         ...Object.fromEntries(def!.fields.filter((f) => visible.includes(f.key)).map((f) => [f.label, r.values[f.key] ?? ""])),
       }));
@@ -202,6 +220,7 @@ export default function ImportJob({ params }: { params: Promise<{ id: string }> 
         <Stepper step={step} done={finished} />
       </div>
 
+      {job.operation === "update" && <Notice tone="amber">Update existing records in <b>{job.companyName}</b>. Every product/service line of a matched invoice or credit memo is replaced by this file. Existing IDs are preserved; paid/applied, taxable and complex records are blocked. Undo restores the saved original if no one has edited it since.</Notice>}
       {/* step 2: columns */}
       {(st === "mapping" || remap) && initial && (
         <Mapping cat={CAT} headers={job.headers} samples={samples} notice={regNotice} initial={withTitle(remap && job.mapping ? { entity: job.entity, mapping: job.mapping, fixed: job.fixed || {}, flipSign: !!job.flipSign, settings: { ...DEFAULT_SETTINGS, ...job.settings } } : initial)}
@@ -230,7 +249,8 @@ export default function ImportJob({ params }: { params: Promise<{ id: string }> 
               {editable && c.posted === 0 && <Button size="sm" icon={<Columns3 className="size-3.5" />} onClick={() => setRemap(true)}>Change columns</Button>}
               {editable && <Button size="sm" icon={<RefreshCw className="size-3.5" />} loading={busy === "check"} onClick={() => recheck(true)} title="Re-read accounts, names and items from QuickBooks, then check every row again">Check again</Button>}
               {editable && <Button size="sm" icon={<EyeOff className="size-3.5" />} loading={busy === "dups"} onClick={skipDups}>Leave out duplicates</Button>}
-              {(finished || c.posted > 0) && <Button size="sm" icon={<Download className="size-3.5" />} loading={busy === "dl"} onClick={downloadResults}>Download results</Button>}
+              <Button size="sm" icon={<Download className="size-3.5" />} loading={busy === "dl"} onClick={downloadResults}>Download results</Button>
+              {editable && c.error > 0 && def.fields.some((f) => f.key === "item") && <Button size="sm" loading={busy === "products"} onClick={downloadMissingProducts}>Missing products template</Button>}
               {c.posted > 0 && !run && <Button size="sm" variant="ghost" className="text-red hover:bg-red-soft" icon={<Undo2 className="size-3.5" />} onClick={() => setConfirm("undo")}>Undo import</Button>}
               {c.posted === 0 && !run && st !== "rolled_back" && <Button size="sm" variant="ghost" icon={<Trash2 className="size-3.5" />} onClick={() => setConfirm("discard")}>Discard</Button>}
             </div>
@@ -286,14 +306,14 @@ export default function ImportJob({ params }: { params: Promise<{ id: string }> 
       </Modal>
 
       {/* confirms */}
-      <Modal open={confirm === "post"} onClose={() => setConfirm("")} title="Post to QuickBooks?"
-        footer={<><Button onClick={() => setConfirm("")}>Cancel</Button><Button variant="primary" icon={<Send className="size-4" />} onClick={() => loop("post")}>Post {plural(c.ready, "row")}</Button></>}>
+      <Modal open={confirm === "post"} onClose={() => setConfirm("")} title={job.operation === "update" ? "Update existing QuickBooks records?" : "Post to QuickBooks?"}
+        footer={<><Button onClick={() => setConfirm("")}>Cancel</Button><Button variant="primary" icon={<Send className="size-4" />} onClick={() => loop("post")}>{job.operation === "update" ? "Update" : "Post"} {plural(c.ready, "row")}</Button></>}>
         <div className="mb-3 rounded-[var(--radius-md)] border border-green-line bg-green-soft px-3 py-2.5">
           <div className="text-[12px] text-green">Company</div>
           <div className="text-[16px] font-semibold text-ink">{job.companyName}</div>
         </div>
         <ul className="space-y-1.5">
-          <li><b className="num">{plural(c.ready, "row")}</b> will be posted{def.isList ? ` as new ${def.label.toLowerCase()}` : ""}.</li>
+          <li><b className="num">{plural(c.ready, "row")}</b> will be {job.operation === "update" ? "used to replace existing product/service lines" : "posted"}{def.isList ? ` as new ${def.label.toLowerCase()}` : ""}.</li>
           {c.error > 0 && <li className="text-amber">{c.error === 1 ? "1 row with problems is" : `${c.error.toLocaleString()} rows with problems are`} left out.</li>}
           {c.skipped > 0 && <li className="text-ink-3">{c.skipped === 1 ? "1 row is" : `${c.skipped.toLocaleString()} rows are`} left out on purpose (including possible duplicates).</li>}
           {c.warning > 0 && <li className="text-amber">{c.warning === 1 ? "1 row has a warning" : `${c.warning.toLocaleString()} rows have warnings`}; see the Warnings tab.</li>}
@@ -303,8 +323,8 @@ export default function ImportJob({ params }: { params: Promise<{ id: string }> 
       </Modal>
       <Modal open={confirm === "undo"} onClose={() => setConfirm("")} title="Undo this import?"
         footer={<><Button onClick={() => setConfirm("")}>Keep it</Button><Button variant="danger" icon={<Undo2 className="size-4" />} onClick={() => loop("undo")}>Undo import</Button></>}>
-        <p>Deletes the {plural(c.posted, "posted row")} of this import from <b className="text-ink">{job.companyName}</b>. Records that QuickBooks never deletes (customers, vendors, items, accounts) are made inactive instead{(job.created?.length || 0) > 0 ? `, including ${plural(job.created.length, "name")} this import created` : ""}.</p>
-        <p className="mt-2 text-[12.5px] text-ink-3">Transactions edited in QuickBooks since posting are still removed.</p>
+        {job.operation === "update" ? <p>Restores the saved originals for {plural(c.posted, "updated row")} in <b>{job.companyName}</b>. Records edited after the update are preserved.</p> : <p>Deletes the {plural(c.posted, "posted row")} of this import from <b className="text-ink">{job.companyName}</b>. Records that QuickBooks never deletes (customers, vendors, items, accounts) are made inactive instead.</p>}
+        <p className="mt-2 text-[12.5px] text-ink-3">Records edited in QuickBooks since posting are preserved. Automatically created names remain active.</p>
       </Modal>
       <Modal open={confirm === "discard"} onClose={() => setConfirm("")} title="Discard this import?"
         footer={<><Button onClick={() => setConfirm("")}>Cancel</Button><Button variant="danger" onClick={discard}>Discard</Button></>}>

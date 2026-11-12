@@ -7,6 +7,18 @@ Built with Next.js 15 (App Router), MongoDB and the QuickBooks Online Accounting
 
 ## What it does
 
+### Updates and linked bank deposits
+
+- Choose **Update existing invoices / credit memos** on Import, or upload a sheet named `Modify - Invoices`. Updates match an exported QuickBooks ID (preferred), or a unique document number and customer. Include the complete set of product/service lines: these replace the existing lines. Unmapped headers are preserved. Paid/applied, taxed and complex documents are blocked. Validation freezes the target version; changed records must be reviewed again through Change columns. Originals are backed up before API updates; undo restores them only if the returned version is still current.
+- Exported invoice/credit memo files now include `SyncToken` and re-importable customer/line columns. Create mode blocks existing IDs to prevent accidental copies.
+- Bank deposits from Undeposited Funds accept comma-separated **Payment IDs**. Each payment must exist in the selected company, be in that account, be unused in deposits and this file, and add up exactly to the deposit. The app never guesses payment links from an equal amount.
+- Bank bill payments accept **Bill No**, including partial payments within that vendor bill's open balance. A register cannot create the missing underlying bill or customer receipts.
+- **Missing products template** downloads the missing item names with blank Type and Income Account. Review and fill these accounting choices, import the Items sheet, then recheck the transaction file. Products/accounts are never silently invented.
+- **Download results** is available during review as well as after posting. It includes row problems and target/result IDs. Entire multi-line transactions are held back when any line fails. Only names needed by ready transactions appear in the posting confirmation.
+- Conversion sheets, Inventory Adjustment, Budget and General Ledger remain blocked. This is a limited bulk importer, not complete SaasAnt feature parity.
+
+Validation: `npm test`, `npm run typecheck`, `npm run build`. Recovery tests simulate lost API responses, backup failures and stale updates without writing to QuickBooks. `npm run test:files -- <paths>` checks workbook structure only; it does not prove live posting.
+
 | Area | Details |
 |---|---|
 | **Companies** | Connect any number of client companies through GATP's Intuit accountant login. Each person picks the company they work in (top bar); the choice is per browser, so several people can work at once on different clients. |

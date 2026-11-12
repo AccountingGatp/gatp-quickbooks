@@ -3,6 +3,7 @@
 // files map automatically; aliases cover common bank / report column names.
 import type { EntityGroup, FieldDef, ImportSettings, Issue, RefKind } from "../types";
 import type { Resolver, Ref } from "./resolver";
+import { linkedPaymentLines } from "./deposit-links";
 
 export type Vals = Record<string, string>;
 export type Built = { entity: string; body: any; label: string };
@@ -14,6 +15,8 @@ export type BuildCtx = {
   docs: Map<string, { id: string; party?: string }[]>; // "Bill|NUMBER" -> existing bills
   openBills?: Map<string, OpenBill[]>; // vendor id -> unpaid bills (for bank lines that pay a bill)
   usedBills?: Set<string>; // bills already paid by an earlier line of the same file
+  depositPayments?: Map<string, { amount: number; account: string; customer: string; deposited: boolean }>;
+  usedPayments?: Set<string>;
 };
 export type OpenBill = { id: string; balance: number; date: string; docNumber?: string };
 
@@ -146,16 +149,16 @@ const EXP_LINES = [
   L(T("description", "Expense Description", ["Description", "Line Description", "Item Description", "Product/Service Description"], { max: 4000 })),
   L(N("amount", "Expense Line Amount", ["Line Amount", "Amount", "Product/Service Amount", "Total"])),
   L(R("item", "Product/Service", "Item", ["Item", "Product", "Service", "Item Name"])),
-  L(N("qty", "Product/Service Quantity", ["Qty", "Quantity"])),
+  L(N("qty", "Product/Service Quantity", ["Qty", "Quantity", "Line Qty"])),
   L(N("rate", "Product/Service Rate", ["Rate", "Unit Price", "Price", "Cost"])),
   L(CLASS),
   L(R("billableCustomer", "Billable Customer", "Customer", ["Customer/Project", "Line Customer"])),
 ];
 const SALES_LINES = [
-  L(R("item", "Product/Service", "Item", ["Item", "Product", "Service", "Item Name", "SKU"])),
+  L(R("item", "Product/Service", "Item", ["Item", "Product", "Service", "Item Name", "SKU", "Line Product/Service"])),
   L(T("description", "Product/Service Description", ["Description", "Line Description", "Item Description"], { max: 4000 })),
-  L(N("qty", "Product/Service Quantity", ["Qty", "Quantity"])),
-  L(N("rate", "Product/Service Rate", ["Rate", "Unit Price", "Price"])),
+  L(N("qty", "Product/Service Quantity", ["Qty", "Quantity", "Line Qty"])),
+  L(N("rate", "Product/Service Rate", ["Rate", "Unit Price", "Price", "Line Rate"])),
   L(N("amount", "Product/Service Amount", ["Amount", "Line Amount", "Total"])),
   L(B("taxable", "Product/Service Taxable", ["Taxable", "Tax"])),
   L(D("serviceDate", "Service Date")),
@@ -183,9 +186,16 @@ export const normType = (s?: string) => (s ? TYPE_ALIASES[s.toLowerCase().replac
 const money2 = (n: number) => "$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 /** Unpaid bills of a vendor that this payment covers: one bill with the same amount, or the oldest bills adding up to it. */
-function matchBills(c: BuildCtx, vendorId: string, vendorName: string, amt: number) {
+function matchBills(c: BuildCtx, vendorId: string, vendorName: string, amt: number, billNo?: string) {
   const all = (c.openBills?.get(vendorId) || []).filter((b) => !c.usedBills?.has(b.id)).sort((a, b) => a.date.localeCompare(b.date));
   const eq = (x: number) => Math.abs(x - amt) < 0.005;
+  if (billNo) {
+    const matches = all.filter((b) => b.docNumber?.toLowerCase() === billNo.toLowerCase());
+    if (matches.length !== 1) throw new Error(`Bill ${billNo} for ${vendorName} is missing, already paid, or ambiguous. Check the bill number in QuickBooks.`);
+    if (amt > matches[0].balance + 0.004) throw new Error(`The payment exceeds the open balance of bill ${billNo}.`);
+    c.usedBills?.add(matches[0].id);
+    return matches;
+  }
   const exact = all.filter((b) => eq(b.balance));
   if (exact.length > 1) throw new Error(`${vendorName} has several unpaid bills for ${money2(amt)}. Use a Bill payments file with an explicit Bill No instead of guessing.`);
   let pick = exact;
@@ -222,7 +232,7 @@ function bankStatement(rows: Vals[], c: BuildCtx): Built {
   if (type === "BillPayment") {
     const vendor = ref(c, "Name", v.payee, "Vendor");
     if (!vendor || vendor.kind !== "Vendor") throw new Error("A bill payment needs the vendor in Payee.");
-    const bills = matchBills(c, vendor.value, vendor.name, amt);
+    const bills = matchBills(c, vendor.value, vendor.name, amt, v.billNo);
     const left = { v: amt };
     return {
       entity: "BillPayment", label: "Bill payment",
@@ -235,6 +245,8 @@ function bankStatement(rows: Vals[], c: BuildCtx): Built {
     };
   }
   if (type === "Deposit") {
+    if (cat?.item?.subType === "UndepositedFunds") return { entity: "Deposit", label: "Linked payment deposit", body: { ...base, DepositToAccountRef: R_(bank), Line: linkedPaymentLines(v, c, cat.value, amt) } };
+    if (v.paymentIds) throw new Error("Payment IDs can only be used for deposits from Undeposited Funds.");
     return {
       entity: "Deposit", label: "Deposit",
       body: { ...base, DepositToAccountRef: R_(bank), Line: [clean({ Amount: amt, DetailType: "DepositLineDetail", Description: (v.description || v.memo || "").slice(0, 4000) || undefined, DepositLineDetail: clean({ AccountRef: R_(cat), Entity: partyRef(c, v, "Customer"), ClassRef: R_(ref(c, "Class", v.className)), CheckNum: v.checkNo || undefined }) })] },
@@ -291,8 +303,9 @@ function statementCheck(rows: Vals[], c: BuildCtx, cc: boolean): Issue[] {
   // money leaves Undeposited Funds only by linking the customer payments waiting there.
   const catHit = v.category ? c.r.find("Account", v.category) : null;
   const moneyIn = !cc && (v.amount != null || v.debit != null || v.credit != null) && signed(v, c, cc) > 0;
-  if (catHit?.item?.subType === "UndepositedFunds" && moneyIn && t !== "Transfer")
-    out.push({ field: "category", level: "error", msg: `A deposit from “${catHit.name}” needs its existing customer-payment links. A register line does not contain those links; create or match this deposit in QuickBooks.` });
+  if (catHit?.item?.subType === "UndepositedFunds" && moneyIn && t !== "Transfer" && !v.paymentIds)
+    out.push({ field: "paymentIds", level: "error", msg: `A deposit from “${catHit.name}” needs existing customer-payment links. Add their QuickBooks Payment IDs, or create/match the deposit in QuickBooks.` });
+  if (v.paymentIds && (!moneyIn || (t && t !== "Deposit"))) out.push({ field: "paymentIds", level: "error", msg: "Payment IDs apply only to incoming bank deposits." });
   const ok = cc ? ["Expense", "Transfer", "CreditCardCredit"] : ["Expense", "Check", "Deposit", "Transfer", "BillPayment"];
   if (t && !ok.includes(t))
     out.push({ field: "type", level: "error", msg: `Transaction type “${v.type}” cannot come from a ${cc ? "card" : "bank"} line here. Use ${cc ? "Expense, CreditCardCredit or Transfer" : "Expense, Check, Deposit, Transfer or Bill Payment"}.` });
@@ -317,6 +330,8 @@ export const ENTITIES: EntityDef[] = [
       T("checkNo", "Check No", ["Check Number", "Cheque No", "Check #", "Check or Slip #", "Check or Slip", "Check/Serial #", "Serial #", "Check Serial", "Ref No", "Reference", "Reference No", "Cheque Number"], { max: 21 }),
       T("type", "Transaction Type", ["Type"], { options: ["Expense", "Check", "Deposit", "Transfer", "Bill Payment"] }),
       R("bankAccount", "Bank Account", "Account", ["Bank", "Bank Account Name"], { required: true, accountTypes: ["Bank"], help: "Usually the same for the whole file: pick it once on the mapping screen." }),
+      T("billNo", "Bill No", ["Bill Number"], { help: "Optional explicit bill number for a bank Bill Payment, including partial payments." }),
+      T("paymentIds", "Payment IDs", ["Customer Payment IDs", "Linked Payment IDs"], { help: "For Undeposited Funds deposits only. Comma-separated QuickBooks customer-payment IDs whose total equals this deposit." }),
       CLASS, LOCATION, T("memo", "Notes", ["Private Note", "Internal Note", "Note"], { max: 4000 }),
     ],
     build: bankStatement,
@@ -772,7 +787,8 @@ function salesDocs(): EntityDef[] {
     key: k.key, label: k.label, group: "Sales" as const, sheetNames: k.sheets, groupBy: "docNumber", description: k.desc,
     fields: [
       T("docNumber", k.no, ["Number", "Doc Number", "Ref No", `${k.entity} Number`], { max: 21 }),
-      R("customer", "Customer", "Customer", ["Customer Name", "Customer/Project", "Bill To"], { required: true }),
+      T("qboId", "QuickBooks ID", ["Id", "Txn ID", "Transaction ID"]), T("syncToken", "SyncToken", ["Sync Token"]),
+      R("customer", "Customer", "Customer", ["Customer Name", "Customer/Project", "Bill To", "Name"], { required: true }),
       D("date", k.date, ["Date", "Txn Date"], { required: true }),
       ...k.extra,
       T("bill1", "Billing Address Line 1", ["Billing Address"]), T("ship1", "Shipping Address Line 1", ["Shipping Address"]),

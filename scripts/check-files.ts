@@ -8,6 +8,7 @@ import { parseDate, parseNumber, parseBool } from "../lib/parse/values";
 import { autoMap, detectEntity } from "../lib/import/automap";
 import { catalog, entityDef, type BuildCtx, type Vals } from "../lib/import/entities";
 import { groupKey, inheritIdentity, headerIssues, unsupportedSheetAction } from "../lib/import/grouping";
+import { modificationSheet } from "../lib/import/updates";
 import { DEFAULT_SETTINGS } from "../lib/types";
 
 if (!process.argv[2]) throw new Error("Provide one or more spreadsheet paths.");
@@ -20,7 +21,8 @@ for (const file of process.argv.slice(2)) {
   const sheets = readWorkbook(buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength) as ArrayBuffer, file);
   const results = sheets.map((sheet) => {
     const key = detectEntity(sheet.name, sheet.headers, catalog());
-    const blocked = unsupportedSheetAction(sheet.name);
+    const operation = modificationSheet(sheet.name) ? "update" : "create";
+    const blocked = unsupportedSheetAction(sheet.name, key || undefined, operation);
     if (!key) return { sheet: sheet.name, rows: sheet.rows.length, blocked: blocked || "Unsupported transaction type" };
     const def = entityDef(key), mapping = autoMap(def.fields, sheet.headers);
     const raw = sheet.rows.map((row) => {
@@ -59,7 +61,7 @@ for (const file of process.argv.slice(2)) {
         total += (out.body.Line || []).reduce((s: number, l: any) => s + Number(l.Amount || 0), 0);
       } catch (e) { failed++; const msg = (e as Error).message; reasons.set(msg, (reasons.get(msg) || 0) + 1); }
     }
-    return { sheet: sheet.name, rows: sheet.rows.length, transactions: groups.size, type: key, blocked, structuralPayloadsBuilt: built, needsReview: failed, payloadLineTotal: Math.round(total * 100) / 100, unmapped: sheet.headers.filter((h) => !Object.values(mapping).includes(h)), reasons: Object.fromEntries(reasons) };
+    return { sheet: sheet.name, rows: sheet.rows.length, transactions: groups.size, type: key, operation, blocked, structuralPayloadsBuilt: built, needsReview: failed, payloadLineTotal: Math.round(total * 100) / 100, unmapped: sheet.headers.filter((h) => !Object.values(mapping).includes(h)), reasons: Object.fromEntries(reasons) };
   });
   console.log(JSON.stringify({ file: basename(file), duplicateOf, checks: "Offline structure only; no QuickBooks validation or posting", sheets: results }, null, 2));
 }

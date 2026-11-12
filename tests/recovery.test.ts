@@ -68,21 +68,28 @@ require.cache[dbPath]!.exports = { jobs: async () => J, jobRows: async () => R, 
 let loseResponse = false, deleteStale = false, verifyBackups = false;
 const requests = new Map<string, { payload: string; results: any[] }>();
 let created = 0, apiCalls = 0, queryCalls = 0;
+let updateRecords: any[] = [];
+let updatedOps: any[] = [];
 const clientPath = require.resolve("../lib/qbo/client");
 require(clientPath);
 require.cache[clientPath]!.exports = {
   escapeQ: (s: string) => s,
-  query: async () => { queryCalls++; return {}; },
+  query: async () => { queryCalls++; return { Invoice: clone(updateRecords) }; },
   batch: async (_realm: string, ops: any[], rid?: string) => {
     apiCalls++;
     if (ops.some((o) => o.operation === "delete")) {
       if (verifyBackups) for (const op of ops) assert(R.docs.some((r) => r.raw?.Id === op.body.Id && r.status === "pending"), "full backup must exist before QuickBooks delete");
       return ops.map((o) => ({ bId: o.bId, ok: !deleteStale, entity: { Id: o.body.Id }, ...(deleteStale ? { error: "Stale Object Error: edited by another user" } : {}) }));
     }
+    if (ops.some((o) => o.operation === "update")) {
+      updatedOps.push(clone(ops));
+      if (!rid) return ops.map((o) => ({ bId: o.bId, ok: !deleteStale, entity: { Id: o.body.Id, SyncToken: "5" }, ...(deleteStale ? { error: "Stale Object Error" } : {}) }));
+      for (const op of ops) assert(B.docs.some((b) => b.groups.some((g: any) => g.original?.Id === op.body.Id)), "update backup must exist before the API mutation");
+    }
     assert(rid, "create requests must have a durable request ID");
     const payload = JSON.stringify(ops);
     if (requests.has(rid)) { assert.equal(requests.get(rid)!.payload, payload, "replay must use an identical payload"); return clone(requests.get(rid)!.results); }
-    const results = ops.map((o) => ({ bId: o.bId, ok: true, entity: { Id: String(++created), SyncToken: "0", TotalAmt: o.body.Amount ?? 10 } }));
+    const results = ops.map((o) => ({ bId: o.bId, ok: true, entity: { Id: o.operation === "update" ? o.body.Id : String(++created), SyncToken: o.operation === "update" ? "4" : "0", TotalAmt: o.body.Amount ?? 10 } }));
     requests.set(rid, { payload, results: clone(results) });
     if (loseResponse) { loseResponse = false; throw new Error("Injected lost QuickBooks response"); }
     return results;
@@ -109,6 +116,7 @@ const { POST: deleteRecords } = require("../app/api/delete/route") as { POST: (r
 let id: ObjectId;
 beforeEach(async () => {
   for (const col of [J, R, B, C]) { col.docs = []; col.failPostedWrite = 0; col.failInsert = false; }
+  updateRecords = []; updatedOps = [];
   requests.clear(); created = apiCalls = queryCalls = 0; loseResponse = deleteStale = verifyBackups = false;
   id = new ObjectId();
   await J.insertOne({ _id: id, kind: "import", entity: "transfers", entityLabel: "Transfers", realmId: "company", companyName: "Sample", status: "review", createdAt: new Date(), counts: {} });
@@ -181,4 +189,48 @@ test("bulk delete does not fetch a new SyncToken after a stale-record error", as
   assert.match(result.results[0].error, /changed after/);
   assert.equal(queryCalls, 0);
   assert.equal(R.docs[0].status, "failed");
+});
+
+async function updateRows() {
+  J.docs[0].operation = "update"; J.docs[0].entity = "invoices";
+  const original = { Id: "45", SyncToken: "3", DocNumber: "I-1", CustomerRef: { value: "Customer" }, Balance: 10, TotalAmt: 10, Line: [{ Id: "1", DetailType: "SalesItemLineDetail", Amount: 10 }] };
+  updateRecords = [original];
+  await R.insertOne({ _id: new ObjectId(), jobId: String(id), idx: 0, group: "g:invoice", status: "ready", values: { docNumber: "I-1", customer: "Customer", item: "Service", amount: "20", date: "2026-11-01" }, target: { type: "Invoice", id: "45", syncToken: "3" }, issues: [] });
+}
+
+test("invoice replacement persists its original before updating and undo restores rather than deletes", async () => {
+  await updateRows();
+  const result = await postChunk(String(id), "Tester");
+  assert.equal(result.counts.posted, 1); assert.equal(created, 0);
+  assert.equal(R.docs[0].qbo.id, "45"); assert.equal(R.docs[0].original.Line[0].Amount, 10);
+  assert.equal(updatedOps[0][0].body.Line[0].Amount, 20);
+  const undo = await rollbackChunk(String(id), "Tester");
+  assert.equal(undo.status, "rolled_back");
+  assert.equal(updatedOps[1][0].operation, "update");
+  assert.equal(updatedOps[1][0].body.Line[0].Amount, 10);
+  assert.equal(updatedOps[1][0].body.SyncToken, "4");
+});
+
+test("invoice replacement is blocked if the original cannot be backed up", async () => {
+  await updateRows(); B.failInsert = true;
+  await assert.rejects(postChunk(String(id), "Tester"), /backup write failure/);
+  assert.equal(apiCalls, 0);
+});
+
+test("invoice replacement refuses changed targets and undo preserves later edits", async () => {
+  await updateRows(); updateRecords[0].SyncToken = "4";
+  const blocked = await postChunk(String(id), "Tester");
+  assert.equal(blocked.counts.failed, 1); assert.equal(apiCalls, 0); assert.match(R.docs[0].error, /changed after review/);
+  R.docs[0].status = "ready"; updateRecords[0].SyncToken = "3"; J.docs[0].status = "review";
+  await postChunk(String(id), "Tester"); deleteStale = true;
+  const undone = await rollbackChunk(String(id), "Tester");
+  assert.equal(undone.status, "partial"); assert.equal(R.docs[0].status, "posted");
+});
+
+test("invoice replacement recovers a lost response with the original saved payload", async () => {
+  await updateRows(); loseResponse = true;
+  await assert.rejects(postChunk(String(id), "Tester"), /lost QuickBooks response/);
+  const result = await postChunk(String(id), "Tester");
+  assert.equal(result.counts.posted, 1); assert.equal(created, 0);
+  assert.equal(R.docs[0].original.Line[0].Amount, 10); assert.equal(apiCalls, 2);
 });

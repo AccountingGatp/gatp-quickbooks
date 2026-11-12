@@ -9,6 +9,9 @@ import { KIND_LABEL, Resolver, norm } from "./resolver";
 import { DEFAULT_SETTINGS, type Counts, type ImportSettings, type Issue, type JobDoc, type ListKind, type RowDoc, type RuleDoc } from "../types";
 import { groupKey, inheritIdentity, headerIssues, unsupportedSheetAction } from "./grouping";
 import { dupKey, DOC_TYPES } from "./duplicates";
+import { loadPaymentLinks } from "./payment-links";
+import { prepareUpdate } from "./updates";
+import { loadUpdateTargets, targetsFor } from "./update-targets";
 export { groupKey } from "./grouping";
 
 export const STATEMENTS = new Set(["bank-statement", "card-statement"]);
@@ -142,7 +145,7 @@ export async function validateJob(jobId: string, only?: Set<string>, alreadyLock
   const J = await jobs(), Rw = await jobRows();
   const job = await J.findOne({ _id: new ObjectId(jobId) });
   if (!job) throw new Error("Import not found.");
-  const unsupported = unsupportedSheetAction(job.sheetName || "");
+  const unsupported = unsupportedSheetAction(job.sheetName || "", job.entity, job.operation);
   if (unsupported) throw new Error(unsupported);
   if (!alreadyLocked && (job.status === "posting" || (job.lockUntil || 0) > Date.now())) throw new Error("Wait for posting or undo to finish before checking this import again.");
   const def = entityDef(job.entity);
@@ -198,6 +201,8 @@ export async function validateJob(jobId: string, only?: Set<string>, alreadyLock
         if (hit) { p.row.rule = hit; ruleHits.set(hit, (ruleHits.get(hit) || 0) + 1); }
       }
       // required fields
+      if (job.operation !== "update" && p.values.qboId) p.issues.push({ field: "qboId", level: "error", msg: "This row contains an existing QuickBooks ID. Choose Update existing to change it; create mode cannot use exported IDs." });
+      if (p.values.qboId && !/^\d+$/.test(p.values.qboId)) p.issues.push({ field: "qboId", level: "error", msg: "QuickBooks ID must be a numeric ID exported from this company." });
       for (const f of def.fields) {
         if (f.required === true && !p.values[f.key]) p.issues.push({ field: f.key, level: "error", msg: `${f.label} is required` });
       }
@@ -256,6 +261,9 @@ export async function validateJob(jobId: string, only?: Set<string>, alreadyLock
 
   // 4. build each transaction (dry run) to catch anything QuickBooks would refuse
   const liveVals = [...groups.values()].flatMap((items) => items.filter((p) => !p.keep && p.row.status !== "skipped").map((p) => p.values));
+  await loadPaymentLinks(job.realmId, liveVals, ctx);
+  const targets = job.operation === "update" ? await loadUpdateTargets(job.realmId, def.key, liveVals) : [];
+  const usedTargets = new Set<string>();
   if (paysBills(def, liveVals)) { ctx.openBills = await loadOpenBills(job.realmId); ctx.usedBills = new Set(); }
   for (const [g, items] of groups) {
     if (only && !only.has(g)) continue;
@@ -269,6 +277,14 @@ export async function validateJob(jobId: string, only?: Set<string>, alreadyLock
     if (live.some((p) => p.issues.some((i) => i.level === "error"))) continue;
     try {
       const b = def.build(vals, ctx);
+      if (job.operation === "update") {
+        if (!vals[0].qboId && !vals[0].docNumber) throw new Error("Update existing needs a QuickBooks ID or document number and customer.");
+        const u = prepareUpdate(b, targetsFor(targets, vals[0]), live[0].row.target, vals[0].syncToken);
+        if (usedTargets.has(u.target.id)) throw new Error("This file targets the same existing record more than once. Keep all its lines together with the same document number and customer.");
+        usedTargets.add(u.target.id);
+        for (const p of live) p.row.target = u.target;
+        live[0].issues.push({ level: "warning", msg: `Updates existing ${b.entity} ${u.target.id}; replaces all product/service lines. Include the complete transaction in the file.` });
+      }
       built.set(g, b);
     } catch (e) {
       const msg = (e as Error).message;
@@ -284,7 +300,7 @@ export async function validateJob(jobId: string, only?: Set<string>, alreadyLock
   }
 
   // 5. duplicates: already in QuickBooks, or twice in this file
-  if (settings.duplicateCheck && !def.list && built.size) {
+  if (job.operation !== "update" && settings.duplicateCheck && !def.list && built.size) {
     const keyed = [...built.entries()].map(([g, b]) => ({ g, b, key: dupKey(b.entity, b.body) }));
     const byType = new Map<string, string[]>();
     for (const k of keyed) if (k.key && k.b.body.TxnDate) byType.set(k.b.entity, [...(byType.get(k.b.entity) || []), k.b.body.TxnDate]);
@@ -339,6 +355,13 @@ export async function validateJob(jobId: string, only?: Set<string>, alreadyLock
   }
 
   // 6. save
+  // Every line belongs to one transaction. A transaction with an invalid line has no ready lines.
+  for (const items of groups.values()) {
+    const live = items.filter((p) => !p.keep && p.row.status !== "skipped");
+    if (live.some((p) => p.issues.some((i) => i.level === "error"))) for (const p of live) {
+      if (!p.issues.some((i) => i.level === "error")) p.issues.push({ level: "error", msg: "Another line of this transaction needs fixing. The complete transaction is held back." });
+    }
+  }
   const ops: AnyBulkWriteOperation<RowDoc>[] = [];
   for (const p of prepared) {
     if (p.keep || (only && !only.has(p.row.group))) continue;
@@ -346,7 +369,7 @@ export async function validateJob(jobId: string, only?: Set<string>, alreadyLock
     // de-duplicate identical messages
     const seen = new Set<string>();
     const issues = p.issues.filter((i) => { const k = `${i.field}|${i.msg}`; if (seen.has(k)) return false; seen.add(k); return true; });
-    ops.push({ updateOne: { filter: { _id: p.row._id }, update: { $set: { values: p.values, issues, status, group: p.row.group, rule: p.row.rule, dup: p.row.dup } } } });
+    ops.push({ updateOne: { filter: { _id: p.row._id }, update: { $set: { values: p.values, issues, status, group: p.row.group, rule: p.row.rule, dup: p.row.dup, ...(p.row.target ? { target: p.row.target } : {}) }, $unset: { error: "" } } } });
   }
   await chunked(ops, 500, async (part) => { await Rw.bulkWrite(part, { ordered: false }); });
   if (ruleHits.size) {
@@ -361,8 +384,16 @@ export async function validateJob(jobId: string, only?: Set<string>, alreadyLock
   }
   const counts = await recount(jobId);
   // names that will be created when posting (merged with earlier checks when only some rows were re-checked)
-  const fresh = [...r.pending.values()];
-  const merged = only ? [...new Map([...(job.newNames || []), ...fresh].map((n) => [`${n.kind}|${norm(n.name)}`, n])).values()] : fresh;
+  const readyNames = new Set<string>();
+  for (const p of prepared) if (!p.keep && p.row.status !== "skipped" && !(p as any).autoSkip && !p.issues.some((i) => i.level === "error")) {
+    for (const f of def.fields) if (f.type === "ref" && f.ref && p.values[f.key]) {
+      const prefer = f.prefer || (def.key === "deposits" || def.group === "Sales" ? "Customer" : "Vendor");
+      const ref = r.find(f.ref, p.values[f.key], prefer);
+      if (ref?.isNew) readyNames.add(`${ref.kind}|${norm(ref.name)}`);
+    }
+  }
+  const fresh = [...r.pending.values()].filter((n) => readyNames.has(`${n.kind}|${norm(n.name)}`));
+  const merged = fresh;
   await J.updateOne({ _id: job._id }, { $set: { counts, fieldsUsed: [...used], newNames: merged.slice(0, 500), validatedAt: new Date(), validationVersion: 2, updatedAt: new Date(), ...(["mapping", "review"].includes(job.status) ? { status: "review" } : {}) } });
   return { counts, pendingNames: merged };
 }

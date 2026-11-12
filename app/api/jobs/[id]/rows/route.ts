@@ -37,7 +37,7 @@ export const GET = route(async (req: Request, { params }: P) => {
   const withRaw = p.get("raw") === "1";
   return {
     total,
-    rows: rows.map(({ _id, raw, ...r }) => ({
+    rows: rows.map(({ _id, raw, original, ...r }) => ({
       ...r, ...(withRaw ? { raw: fromRaw(job.headers || [], raw) } : {}),
       ...(r.qbo && (r.status === "posted") ? { link: qboLink(r.qbo.type, r.qbo.id, { paymentType: r.qbo.paymentType, credit: r.qbo.credit }) } : {}),
     })),

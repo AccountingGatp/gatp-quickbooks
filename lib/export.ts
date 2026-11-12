@@ -58,7 +58,8 @@ export function flatten(type: string, records: any[]): Record<string, unknown>[]
   for (const r of records) {
     const s = summary(type, r);
     const head = {
-      Type: s.kind, Id: s.id, Date: s.date, Number: s.number, Name: s.name,
+      Type: s.kind, Id: s.id, SyncToken: String(r.SyncToken ?? "0"), Date: s.date, Number: s.number, Name: s.name,
+      ...(["Invoice", "CreditMemo"].includes(type) ? { Customer: s.name } : {}),
       ...(type === "Purchase" ? { "Payment Account": ref(r.AccountRef), "Payment Type": r.PaymentType } : {}),
       ...(type === "Deposit" ? { "Deposit To": ref(r.DepositToAccountRef) } : {}),
       ...(type === "Transfer" ? { From: ref(r.FromAccountRef), To: ref(r.ToAccountRef) } : {}),
@@ -83,3 +84,4 @@ export function flatten(type: string, records: any[]): Record<string, unknown>[]
   }
   return out;
 }
+
