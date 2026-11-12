@@ -8,7 +8,9 @@
     "build": "next build",
     "start": "next start -p 3000",
     "typecheck": "tsc --noEmit",
-    "test:engine": "tsx scripts/smoke.ts"
+    "test:engine": "node --import tsx scripts/smoke.ts",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "test:files": "node --import tsx scripts/check-files.ts"
   },
   "engines": {
     "node": ">=20"
@@ -32,3 +34,4 @@
     "typescript": "5.9.2"
   }
 }
+

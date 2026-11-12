@@ -5,6 +5,7 @@ import { requireCompany, requireSession, route } from "@/lib/http";
 import { entityDef } from "@/lib/import/entities";
 import { EMPTY_COUNTS, publicJob } from "@/lib/jobs";
 import { DEFAULT_SETTINGS, type JobDoc } from "@/lib/types";
+import { unsupportedSheetAction } from "@/lib/import/grouping";
 export const dynamic = "force-dynamic";
 
 export const GET = route(async (req: Request) => {
@@ -28,6 +29,8 @@ export const GET = route(async (req: Request) => {
 export const POST = route(async (req: Request) => {
   const { session, company } = await requireCompany();
   const { entity, fileName, sheetName, headers, notes } = await req.json();
+  const unsupported = unsupportedSheetAction(String(sheetName || ""));
+  if (unsupported) throw new Error(unsupported);
   const def = entityDef(String(entity));
   if (!Array.isArray(headers) || !headers.length) throw new Error("The file has no column headers.");
   const now = new Date();
@@ -40,3 +43,4 @@ export const POST = route(async (req: Request) => {
   await (await jobs()).insertOne(doc);
   return { id: String(doc._id) };
 });
+

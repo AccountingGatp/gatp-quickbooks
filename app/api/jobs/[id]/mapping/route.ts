@@ -7,13 +7,16 @@ import { signature } from "@/lib/import/automap";
 import { validateJob } from "@/lib/import/validate";
 import { logActivity } from "@/lib/audit";
 import { DEFAULT_SETTINGS, type ImportSettings } from "@/lib/types";
+import { lockJob, unlockJob } from "@/lib/import/post";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 type P = { params: Promise<{ id: string }> };
 
 export const PUT = route(async (req: Request, { params }: P) => {
   const s = await requireSession();
-  const job = await getJob((await params).id);
+  const found = await getJob((await params).id);
+  const job = await lockJob(found._id, s.name);
+  try {
   const nothingPosted = (job.counts?.posted || 0) === 0 && ["failed", "partial"].includes(job.status);
   if (!["mapping", "review"].includes(job.status) && !nothingPosted) throw new Error("Part of this import is already in QuickBooks, so its columns can no longer change. Fix rows in the grid instead.");
   const body = (await req.json()) as { mapping: Record<string, string | null>; fixed?: Record<string, string>; flipSign?: boolean; settings?: Partial<ImportSettings>; entity?: string };
@@ -60,7 +63,9 @@ export const PUT = route(async (req: Request, { params }: P) => {
   await M.updateOne({ entity: def.key, signature: sig, realmId: { $exists: false } }, { $set: { mapping, flipSign: !!body.flipSign, name: job.fileName || def.label, updatedAt: now, updatedBy: s.name } }, { upsert: true });
   await M.updateOne({ entity: def.key, signature: sig, realmId: job.realmId }, { $set: { mapping, fixed, flipSign: !!body.flipSign, name: job.fileName || def.label, updatedAt: now, updatedBy: s.name } }, { upsert: true });
 
-  const res = await validateJob(jobId);
+  const res = await validateJob(jobId, undefined, true);
   if (job.status === "mapping") await logActivity({ user: s.name, realmId: job.realmId, companyName: job.companyName, action: "Uploaded file", detail: `${def.label}, ${job.fileName}, ${res.counts.total} rows`, jobId });
   return res;
+  } finally { await unlockJob(job._id, job.lockToken); }
 });
+

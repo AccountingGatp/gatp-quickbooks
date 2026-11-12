@@ -15,6 +15,8 @@ export type CompanyDoc = {
   connectedBy: string;
   lastUsedAt?: Date;
   refreshLockUntil?: number;
+  postingLockUntil?: number;
+  postingLockToken?: string;
   settings?: Partial<ImportSettings>;
   homeCurrency?: string;
 };
@@ -95,7 +97,9 @@ export type JobDoc = {
   newNames?: { kind: string; name: string }[]; // names that will be created when posting
   fieldsUsed?: string[]; // fields that have a value (or a problem) in at least one row
   lockUntil?: number;
+  lockToken?: string;
   validatedAt?: Date;
+  validationVersion?: number;
   createdAt: Date;
   updatedAt: Date;
   finishedAt?: Date;
@@ -175,3 +179,4 @@ export type ListItem = {
 };
 export type ListKind = "Account" | "Vendor" | "Customer" | "Employee" | "Item" | "Class" | "Department" | "PaymentMethod" | "Term";
 export type ListCacheDoc = { _id?: ObjectId; realmId: string; kind: ListKind; items: ListItem[]; fetchedAt: Date };
+

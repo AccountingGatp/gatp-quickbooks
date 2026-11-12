@@ -31,6 +31,7 @@ export async function tokenRequest(body: Record<string, string>) {
     headers: { Authorization: basicAuth(), Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams(body),
     cache: "no-store",
+    signal: AbortSignal.timeout(20_000),
   });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new QboError(j.error_description || j.error || `Intuit login error ${r.status}`, j.error, r.status);
@@ -104,6 +105,7 @@ export async function api(realmId: string, path: string, opts: { body?: unknown;
       headers: { Authorization: `Bearer ${token}`, Accept: "application/json", ...(opts.body ? { "Content-Type": "application/json" } : {}) },
       body: opts.body ? JSON.stringify(opts.body) : undefined,
       cache: "no-store",
+      signal: AbortSignal.timeout(20_000),
     });
     if (r.status === 401 && attempt === 0) { token = await accessToken(realmId, true); continue; }
     if ((r.status === 429 || r.status >= 500) && attempt < 4) { await sleep(1200 * (attempt + 1) ** 2); continue; }
@@ -171,3 +173,4 @@ export function qboLink(type: string, id: string, extra?: { paymentType?: string
   if (type === "Account") return `${APP_BASE}/app/chartofaccounts`;
   return `${APP_BASE}/app/homepage`;
 }
+

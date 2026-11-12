@@ -1,6 +1,7 @@
 // MongoDB connection (one cached client per server instance, safe for Vercel serverless).
 import { MongoClient, type Db, type Collection, type Document } from "mongodb";
 import type { CompanyDoc, JobDoc, RowDoc, MappingDoc, RuleDoc, AuditDoc, ListCacheDoc } from "./types";
+import type { PostBatchDoc } from "./import/batches";
 
 const g = globalThis as unknown as { _mongo?: Promise<MongoClient>; _indexes?: Promise<void> };
 
@@ -29,6 +30,7 @@ async function ensureIndexes(d: Db) {
     d.collection("jobs").createIndex({ createdAt: -1 }),
     d.collection("job_rows").createIndex({ jobId: 1, idx: 1 }, { unique: true }),
     d.collection("job_rows").createIndex({ jobId: 1, status: 1 }),
+    d.collection("post_batches").createIndex({ jobId: 1, completed: 1 }),
     d.collection("mappings").createIndex({ entity: 1, signature: 1 }),
     d.collection("rules").createIndex({ realmId: 1, order: 1 }),
     d.collection("audit").createIndex({ ts: -1 }),
@@ -41,7 +43,9 @@ const col = <T extends Document>(name: string) => async (): Promise<Collection<T
 export const companies = col<CompanyDoc>("companies");
 export const jobs = col<JobDoc>("jobs");
 export const jobRows = col<RowDoc>("job_rows");
+export const postBatches = col<PostBatchDoc>("post_batches");
 export const mappings = col<MappingDoc>("mappings");
 export const rules = col<RuleDoc>("rules");
 export const audit = col<AuditDoc>("audit");
 export const listCache = col<ListCacheDoc>("list_cache");
+

@@ -2,10 +2,10 @@
 import { jobRows, jobs } from "@/lib/db";
 import { requireSession, route } from "@/lib/http";
 import { fromRaw, getJob, toRaw } from "@/lib/jobs";
-import { entityDef } from "@/lib/import/entities";
-import { groupKey, validateJob } from "@/lib/import/validate";
+import { validateJob } from "@/lib/import/validate";
 import { qboLink } from "@/lib/qbo/client";
 import type { RowDoc } from "@/lib/types";
+import { lockJob, unlockJob } from "@/lib/import/post";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 type P = { params: Promise<{ id: string }> };
@@ -60,10 +60,11 @@ export const POST = route(async (req: Request, { params }: P) => {
 
 /** Edits from the review grid. */
 export const PATCH = route(async (req: Request, { params }: P) => {
-  await requireSession();
-  const job = await getJob((await params).id);
+  const session = await requireSession();
+  const found = await getJob((await params).id);
+  const job = await lockJob(found._id, session.name);
+  try {
   if (!["review", "partial", "failed"].includes(job.status)) throw new Error("This import can no longer be edited.");
-  const def = entityDef(job.entity);
   const body = (await req.json()) as {
     edits?: { idx: number; field: string; value: string }[];
     skip?: number[]; unskip?: number[];
@@ -72,14 +73,11 @@ export const PATCH = route(async (req: Request, { params }: P) => {
   };
   const R = await jobRows();
   const jobId = String(job._id);
-  const touched = new Set<string>();
   const editable = { status: { $in: ["pending", "ready", "error", "skipped", "failed"] as RowDoc["status"][] } };
   const apply = async (idxs: number[], change: (r: RowDoc) => Partial<RowDoc>) => {
     const rows = await R.find({ jobId, idx: { $in: idxs }, ...editable }).toArray();
     for (const r of rows) {
-      touched.add(r.group);
       const set = change(r);
-      if (set.values) touched.add(groupKey(def, set.values, r.idx));
       await R.updateOne({ _id: r._id }, { $set: set });
     }
   };
@@ -93,6 +91,9 @@ export const PATCH = route(async (req: Request, { params }: P) => {
     const d = (await R.find({ jobId, status: "ready" }).toArray()).filter((x) => x.dup);
     await apply(d.map((x) => x.idx), () => ({ status: "skipped" }));
   }
-  const res = await validateJob(jobId, touched.size ? touched : undefined);
+  // Re-check all groups: editing an identity can move a line to a different document.
+  const res = await validateJob(jobId, undefined, true);
   return res;
+  } finally { await unlockJob(job._id, job.lockToken); }
 });
+

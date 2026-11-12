@@ -2,36 +2,60 @@
 // works within Vercel's time limits and can be resumed from History if the tab is closed).
 // Safety:
 //  - one poster per import at a time (job lock)
-//  - every QuickBooks batch carries a requestid built from its rows, so a retried chunk is not created twice
+//  - transaction batches and their request IDs are saved before sending and replayed unchanged
 //  - only transactions whose rows are all "ready" are posted; rows with errors are left out
 import { ObjectId } from "mongodb";
-import { createHash } from "crypto";
-import { jobRows, jobs } from "../db";
+import { createHash, randomUUID } from "crypto";
+import { jobRows, jobs, postBatches, companies } from "../db";
 import { batch, query, escapeQ, type BatchOp } from "../qbo/client";
-import { addToList } from "../qbo/lists";
+import { addToList, clearLists } from "../qbo/lists";
+import { assertCompleteResults, type PostBatchDoc } from "./batches";
+import { unsupportedSheetAction } from "./grouping";
 import { logActivity } from "../audit";
 import { entityDef, type BuildCtx } from "./entities";
-import { Resolver, norm, type Ref } from "./resolver";
-import { fillGroup, jobSettings, loadOpenBills, paysBills, recount, refKinds } from "./validate";
+import { Resolver, norm } from "./resolver";
+import { fillGroup, jobSettings, loadOpenBills, paysBills, recount, refKinds, validateJob } from "./validate";
 import type { CreatedRef, JobDoc, ListKind, RowDoc } from "../types";
 
-const LOCK_MS = 90_000;
+const LOCK_MS = 300_000;
 
 export async function lockJob(id: ObjectId, user: string) {
   const now = Date.now();
   const r = await (await jobs()).findOneAndUpdate(
     { _id: id, $or: [{ lockUntil: { $exists: false } }, { lockUntil: { $lt: now } }] },
-    { $set: { lockUntil: now + LOCK_MS } },
+    { $set: { lockUntil: now + LOCK_MS, lockToken: randomUUID() } },
+    { returnDocument: "after" },
   );
   if (!r) throw new Error("This import is being worked on in another tab or by another person. Wait a moment and try again.");
   return r;
 }
-export async function unlockJob(id: ObjectId) {
-  await (await jobs()).updateOne({ _id: id }, { $unset: { lockUntil: "" } });
+export async function unlockJob(id: ObjectId, lockToken: string | undefined) {
+  await (await jobs()).updateOne({ _id: id, lockToken }, { $unset: { lockUntil: "", lockToken: "" } });
 }
 
 const requestId = (jobId: string, parts: string[]) =>
   createHash("sha256").update(jobId + "|" + parts.join(",")).digest("hex").slice(0, 36);
+
+export async function lockCompany(realmId: string) {
+  const token = randomUUID();
+  const got = await (await companies()).findOneAndUpdate(
+    { _id: realmId, $or: [{ postingLockUntil: { $exists: false } }, { postingLockUntil: { $lt: Date.now() } }] },
+    { $set: { postingLockUntil: Date.now() + LOCK_MS, postingLockToken: token } },
+  );
+  if (!got) throw new Error("Another import, delete or undo is working in this company. Wait for it to finish, then retry.");
+  return token;
+}
+
+export async function unlockCompany(realmId: string, token: string) {
+  await (await companies()).updateOne({ _id: realmId, postingLockToken: token }, { $unset: { postingLockUntil: "", postingLockToken: "" } });
+}
+
+async function renewLocks(job: JobDoc, token: string) {
+  const until = Date.now() + LOCK_MS;
+  const j = await (await jobs()).updateOne({ _id: job._id, lockToken: job.lockToken }, { $set: { lockUntil: until } });
+  const c = await (await companies()).updateOne({ _id: job.realmId, postingLockToken: token }, { $set: { postingLockUntil: until } });
+  if (!j.matchedCount || !c.matchedCount) throw new Error("The import lock expired. Stop and resume from History before continuing.");
+}
 
 /** Create names that the file uses but QuickBooks does not have yet (vendors, customers, classes, …). */
 async function createMissing(job: JobDoc, r: Resolver, def: ReturnType<typeof entityDef>, rows: RowDoc[], created: CreatedRef[]) {
@@ -70,102 +94,119 @@ async function createMissing(job: JobDoc, r: Resolver, def: ReturnType<typeof en
 
 export type PostProgress = { done: boolean; counts: JobDoc["counts"]; status: string; message?: string };
 
+/** Replay the exact stored request after interruption, even if row statuses were partly saved. */
+async function finishBatch(intent: PostBatchDoc, job: JobDoc, resolver?: Resolver) {
+  const B = await postBatches(), R = await jobRows();
+  let results = intent.results;
+  if (!results) {
+    results = await batch(intent.realmId, intent.ops, intent._id);
+    assertCompleteResults(intent.ops, results);
+    await B.updateOne({ _id: intent._id }, { $set: { results } });
+  }
+  for (const res of results) {
+    const op = intent.ops.find((x) => x.bId === res.bId)!;
+    const group = intent.groups.find((x) => x.bId === res.bId)!;
+    const e = res.entity || {};
+    await R.updateMany({ jobId: intent.jobId, idx: { $in: group.idxs } }, res.ok ? {
+      $set: { status: "posted", postedAt: new Date(), qbo: { type: op.entity, id: String(e.Id), docNumber: e.DocNumber, syncToken: e.SyncToken, total: Number(e.TotalAmt ?? e.Amount ?? 0), paymentType: e.PaymentType, credit: !!e.Credit } },
+      $unset: { error: "" },
+    } : { $set: { status: "failed", error: res.error } });
+    if (res.ok && entityDef(job.entity).list && resolver) {
+      const kind = entityDef(job.entity).list!.kind as ListKind;
+      resolver.add(kind, { id: String(e.Id), name: e.DisplayName || e.Name, full: e.FullyQualifiedName, active: true, kind, type: e.AccountType || e.Type });
+    }
+  }
+  if (entityDef(job.entity).list) await clearLists(intent.realmId);
+  await B.updateOne({ _id: intent._id }, { $set: { completed: true } });
+}
+
 export async function postChunk(jobId: string, user: string, budgetMs = 40_000): Promise<PostProgress> {
   const id = new ObjectId(jobId);
   const job = await lockJob(id, user);
   const started = Date.now();
-  const J = await jobs(), Rw = await jobRows();
+  const J = await jobs(), Rw = await jobRows(), B = await postBatches();
+  let companyLock: string | undefined;
   try {
+    companyLock = await lockCompany(job.realmId);
+    const unsupported = unsupportedSheetAction(job.sheetName || "");
+    if (unsupported) throw new Error(unsupported);
     if (!["review", "posting", "partial", "failed"].includes(job.status)) throw new Error("This import cannot be posted in its current state.");
-    const def = entityDef(job.entity);
-    const settings = await jobSettings(job);
-    const r = new Resolver(job.realmId, settings);
-    await r.load(refKinds(def));
+    // Older interrupted imports have no durable payload, so cannot be safely reconstructed.
+    const pending = await B.find({ jobId, completed: false }).sort({ createdAt: 1 }).toArray();
+    const uncertain = await Rw.find({ jobId, status: "posting" }).toArray();
+    const covered = new Set(pending.flatMap((p) => p.groups.flatMap((g) => g.idxs)));
+    if (uncertain.some((r) => !covered.has(r.idx))) throw new Error("An older import stopped before its QuickBooks result was saved. Check these rows in QuickBooks before retrying; automatic replay is blocked to prevent duplicates.");
+    if (job.status !== "posting") await validateJob(jobId, undefined, true);
     if (job.status !== "posting") {
       await J.updateOne({ _id: id }, { $set: { status: "posting", updatedAt: new Date() } });
       await logActivity({ user, realmId: job.realmId, companyName: job.companyName, action: "Started posting", detail: `${job.entityLabel}, ${job.fileName}`, jobId });
     }
+    for (const intent of pending) {
+      await finishBatch(intent, job);
+      await renewLocks(job, companyLock);
+      await J.updateOne({ _id: id, lockToken: job.lockToken }, { $set: { lockUntil: Date.now() + LOCK_MS } });
+      if (Date.now() - started >= budgetMs) return { done: false, counts: await recount(jobId), status: "posting" };
+    }
+
+    const def = entityDef(job.entity);
+    const settings = await jobSettings(job);
+    const r = new Resolver(job.realmId, settings);
+    await r.load(refKinds(def));
     const created: CreatedRef[] = [...(job.created || [])];
-    const all = await Rw.find({ jobId, status: { $in: ["ready", "posting", "error"] } }).sort({ idx: 1 }).toArray();
-    // groups that can be posted: every non-skipped row is ready (or was mid-post)
+    const all = await Rw.find({ jobId, status: { $in: ["ready", "error", "failed"] } }).sort({ idx: 1 }).toArray();
     const byGroup = new Map<string, RowDoc[]>();
     for (const row of all) byGroup.set(row.group, [...(byGroup.get(row.group) || []), row]);
-    const postable = [...byGroup.entries()].filter(([, rows]) => rows.every((x) => x.status === "ready" || x.status === "posting"));
-
+    const postable = [...byGroup.entries()].filter(([, rows]) => rows.every((x) => x.status === "ready"));
     const ctx: BuildCtx = { r, settings, flip: !!job.flipSign, docs: new Map() };
     if (paysBills(def, postable.flatMap(([, rows]) => rows.map((x) => x.values)))) { ctx.openBills = await loadOpenBills(job.realmId); ctx.usedBills = new Set(); }
-    // payment files: look up the bills / invoices they apply to
     for (const dl of def.docLookups || []) {
       const nums = [...new Set(postable.flatMap(([, rows]) => rows.map((x) => x.values[dl.field]).filter(Boolean)))];
       for (let i = 0; i < nums.length; i += 40) {
         const res = await query(job.realmId, `select * from ${dl.type} where DocNumber IN (${nums.slice(i, i + 40).map((n) => `'${escapeQ(n)}'`).join(",")}) maxresults 1000`);
+        if ((res[dl.type] || []).length >= 1000) throw new Error("Too many matching documents. Narrow the import so every payment target can be verified.");
         for (const t of res[dl.type] || []) {
           const k = `${dl.type}|${String(t.DocNumber).toLowerCase()}`;
           ctx.docs.set(k, [...(ctx.docs.get(k) || []), { id: t.Id, party: t.VendorRef?.value || t.CustomerRef?.value }]);
         }
       }
     }
-
     let cursor = 0;
     while (cursor < postable.length && Date.now() - started < budgetMs) {
       const chunk = postable.slice(cursor, cursor + 30);
       cursor += chunk.length;
-      const chunkRows = chunk.flatMap(([, rows]) => rows);
-      await createMissing(job, r, def, chunkRows, created);
-
-      const ops: BatchOp[] = [];
-      const failed: { rows: RowDoc[]; error: string }[] = [];
-      chunk.forEach(([g, rows], j) => {
+      await createMissing(job, r, def, chunk.flatMap(([, rows]) => rows), created);
+      await renewLocks(job, companyLock);
+      await J.updateOne({ _id: id, lockToken: job.lockToken }, { $set: { created, lockUntil: Date.now() + LOCK_MS } });
+      const ops: BatchOp[] = [], groups: PostBatchDoc["groups"] = [];
+      for (let j = 0; j < chunk.length; j++) {
+        const [, rows] = chunk[j];
         try {
-          const b = def.build(fillGroup(def, rows.map((x) => x.values)), ctx);
-          ops.push({ bId: String(j), operation: "create", entity: b.entity, body: b.body });
+          const built = def.build(fillGroup(def, rows.map((x) => x.values)), ctx);
+          ops.push({ bId: String(j), operation: "create", entity: built.entity, body: built.body });
+          groups.push({ bId: String(j), idxs: rows.map((x) => x.idx) });
         } catch (e) {
-          failed.push({ rows, error: (e as Error).message });
-        }
-      });
-      const rid = requestId(jobId, chunk.map(([g, rows]) => g + ":" + rows.map((x) => x.idx).join(".")));
-      const okGroups = chunk.filter((_, j) => ops.some((o) => o.bId === String(j)));
-      await Rw.updateMany({ jobId, group: { $in: okGroups.map(([g]) => g) }, status: { $in: ["ready", "posting"] } }, { $set: { status: "posting", requestId: rid } });
-
-      const results = await batch(job.realmId, ops, rid);
-      const now = new Date();
-      const bulk = [];
-      for (const res of results) {
-        const [, rows] = chunk[Number(res.bId)];
-        const op = ops.find((o) => o.bId === res.bId)!;
-        const e = res.entity || {};
-        bulk.push({
-          updateMany: {
-            filter: { jobId, idx: { $in: rows.map((x) => x.idx) } },
-            update: res.ok
-              ? { $set: { status: "posted" as const, postedAt: now, qbo: { type: op.entity, id: String(e.Id), docNumber: e.DocNumber, syncToken: e.SyncToken, total: Number(e.TotalAmt ?? e.Amount ?? 0), paymentType: e.PaymentType, credit: !!e.Credit } }, $unset: { error: "" } }
-              : { $set: { status: "failed" as const, error: res.error } },
-          },
-        });
-        if (res.ok && def.list) {
-          const kind = def.list.kind as ListKind;
-          const item = { id: String(e.Id), name: e.DisplayName || e.Name, full: e.FullyQualifiedName, active: true, kind, type: e.AccountType || e.Type };
-          r.add(kind, item);
-          await addToList(job.realmId, kind, item);
+          await Rw.updateMany({ jobId, idx: { $in: rows.map((x) => x.idx) } }, { $set: { status: "failed", error: (e as Error).message } });
         }
       }
-      for (const f of failed) bulk.push({ updateMany: { filter: { jobId, idx: { $in: f.rows.map((x) => x.idx) } }, update: { $set: { status: "failed" as const, error: f.error } } } });
-      if (bulk.length) await Rw.bulkWrite(bulk as any, { ordered: false });
-      await J.updateOne({ _id: id }, { $set: { created, lockUntil: Date.now() + LOCK_MS, updatedAt: new Date() } });
+      if (ops.length) {
+        const intent: PostBatchDoc = { _id: randomUUID(), jobId, realmId: job.realmId, ops, groups, completed: false, createdAt: new Date() };
+        await B.insertOne(intent);
+        await Rw.updateMany({ jobId, idx: { $in: groups.flatMap((g) => g.idxs) } }, { $set: { status: "posting", requestId: intent._id } });
+        await renewLocks(job, companyLock);
+        await finishBatch(intent, job, r);
+      }
+      await J.updateOne({ _id: id, lockToken: job.lockToken }, { $set: { lockUntil: Date.now() + LOCK_MS, updatedAt: new Date() } });
     }
-
     const counts = await recount(jobId);
     const remaining = await Rw.countDocuments({ jobId, status: { $in: ["ready", "posting"] } });
     const done = remaining === 0 || cursor >= postable.length;
-    let status: JobDoc["status"] = "posting";
-    if (done) {
-      status = counts.posted === 0 ? "failed" : counts.failed || counts.error ? "partial" : "completed";
-      await logActivity({ user, realmId: job.realmId, companyName: job.companyName, action: status === "completed" ? "Posted import" : status === "partial" ? "Posted import (some rows not posted)" : "Import failed", detail: `${job.entityLabel}, ${counts.posted} rows posted, ${counts.failed} failed${created.length ? `, ${created.length} new names created` : ""}`, jobId });
-    }
+    const status: JobDoc["status"] = !done ? "posting" : counts.posted === 0 ? "failed" : counts.failed || counts.error ? "partial" : "completed";
+    if (done) await logActivity({ user, realmId: job.realmId, companyName: job.companyName, action: status === "completed" ? "Posted import" : status === "partial" ? "Posted import (some rows not posted)" : "Import failed", detail: `${job.entityLabel}, ${counts.posted} rows posted, ${counts.failed} failed`, jobId });
     await J.updateOne({ _id: id }, { $set: { counts, status, updatedAt: new Date(), ...(done ? { finishedAt: new Date() } : {}) } });
     return { done, counts, status };
   } finally {
-    await unlockJob(id);
+    try { if (companyLock) await unlockCompany(job.realmId, companyLock); }
+    finally { await unlockJob(id, job.lockToken); }
   }
 }
 
@@ -177,8 +218,11 @@ export async function rollbackChunk(jobId: string, user: string, budgetMs = 40_0
   const job = await lockJob(id, user);
   const started = Date.now();
   const J = await jobs(), Rw = await jobRows();
+  let companyLock: string | undefined;
   try {
+    companyLock = await lockCompany(job.realmId);
     if (job.kind !== "import") throw new Error("Only imports can be undone.");
+    if (await (await postBatches()).countDocuments({ jobId, completed: false })) throw new Error("Resume posting first to recover the outstanding QuickBooks response before undoing this import.");
     const posted = await Rw.find({ jobId, status: "posted", qbo: { $exists: true } }).sort({ idx: 1 }).toArray();
     // one QuickBooks record may cover several rows
     const recs = new Map<string, { type: string; id: string; syncToken?: string; idxs: number[] }>();
@@ -191,21 +235,13 @@ export async function rollbackChunk(jobId: string, user: string, budgetMs = 40_0
     const list = [...recs.values()];
     const problems: string[] = [];
     for (let i = 0; i < list.length && Date.now() - started < budgetMs; i += 30) {
+      await renewLocks(job, companyLock);
       const part = list.slice(i, i + 30);
       const run = async (items: typeof part) => batch(job.realmId, items.map((x, j) => LIST_TYPES.has(x.type)
         ? { bId: String(j), operation: "update" as const, entity: x.type, body: { Id: x.id, SyncToken: x.syncToken || "0", sparse: true, Active: false } }
         : { bId: String(j), operation: "delete" as const, entity: x.type, body: { Id: x.id, SyncToken: x.syncToken || "0" } }));
-      let res = await run(part);
-      // edited in QuickBooks since posting: read the latest version and try once more
-      const stale = part.filter((_, j) => !res[j].ok && /stale|syncToken/i.test(res[j].error || ""));
-      if (stale.length) {
-        for (const s of stale) {
-          const q = await query(job.realmId, `select * from ${s.type} where Id = '${s.id}'`);
-          s.syncToken = q[s.type]?.[0]?.SyncToken ?? s.syncToken;
-        }
-        const res2 = await run(stale);
-        res = res.map((x, j) => { const k = stale.indexOf(part[j]); return k >= 0 ? res2[k] : x; });
-      }
+      const res = await run(part);
+      // A changed SyncToken means someone edited the record. Preserve their work.
       const bulk = part.map((x, j) => {
         const ok = res[j].ok || /not found|deleted/i.test(res[j].error || "");
         if (!ok) problems.push(`${x.type} ${x.id}: ${res[j].error}`);
@@ -217,14 +253,7 @@ export async function rollbackChunk(jobId: string, user: string, budgetMs = 40_0
     const stillThere = await Rw.find({ jobId, status: "posted" }, { projection: { error: 1 } }).toArray();
     const left = stillThere.filter((x) => !String(x.error || "").startsWith("Undo failed")).length;
     const done = left === 0;
-    if (done && job.created?.length) {
-      // names this import created: make them inactive (QuickBooks never deletes names)
-      for (let i = 0; i < job.created.length; i += 30) {
-        const part = job.created.slice(i, i + 30);
-        const cur = await Promise.all(part.map((c) => query(job.realmId, `select * from ${c.type} where Id = '${c.id}'`).then((q) => q[c.type]?.[0])));
-        await batch(job.realmId, part.map((c, j) => ({ bId: String(j), operation: "update", entity: c.type, body: { Id: c.id, SyncToken: cur[j]?.SyncToken || "0", sparse: true, Active: false } })));
-      }
-    }
+    // Keep auto-created names active: other transactions may now use them.
     const counts = await recount(jobId);
     const stillPosted = counts.posted;
     if (done) {
@@ -233,6 +262,8 @@ export async function rollbackChunk(jobId: string, user: string, budgetMs = 40_0
     await J.updateOne({ _id: id }, { $set: { counts, updatedAt: new Date(), ...(done ? { status: stillPosted ? "partial" : "rolled_back", finishedAt: new Date() } : {}) } });
     return { done, counts, status: done ? (stillPosted ? "partial" : "rolled_back") : "posting", message: problems.slice(0, 5).join("\n") || undefined };
   } finally {
-    await unlockJob(id);
+    try { if (companyLock) await unlockCompany(job.realmId, companyLock); }
+    finally { await unlockJob(id, job.lockToken); }
   }
 }
+

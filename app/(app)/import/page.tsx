@@ -10,12 +10,13 @@ import { api, plural, when } from "@/lib/client";
 import { catalog, type CatalogEntity } from "@/lib/import/entities";
 import { detectEntity } from "@/lib/import/automap";
 import { readWorkbook, type ParsedSheet } from "@/lib/parse/file";
+import { unsupportedSheetAction } from "@/lib/import/grouping";
 
 const CAT = catalog();
 const GROUPS = ["Banking", "Purchases", "Sales", "Accounting", "Lists"] as const;
 const ACCEPT = ".xlsx,.xls,.xlsm,.xlsb,.ods,.csv,.tsv,.txt";
 
-type Sheet = ParsedSheet & { detected: string | null; choice: string };
+type Sheet = ParsedSheet & { detected: string | null; choice: string; blocked: string | null };
 
 export default function ImportStart() {
   const router = useRouter();
@@ -52,7 +53,7 @@ export default function ImportStart() {
       setFile({
         name, sheets: sheets.map((s) => {
           const detected = detectEntity(s.name, s.headers, CAT);
-          return { ...s, detected, choice: type !== "auto" ? type : detected || "" };
+          return { ...s, detected, choice: type !== "auto" ? type : detected || "", blocked: unsupportedSheetAction(s.name) };
         }),
       });
     } catch (e) { toast("error", (e as Error).message); } finally { setReading(false); }
@@ -72,6 +73,7 @@ export default function ImportStart() {
   }
 
   async function start(s: Sheet) {
+    if (s.blocked) return toast("error", s.blocked);
     if (!s.choice) return toast("error", "Choose what this sheet contains first.");
     setUpload({ sheet: s.name, done: 0, total: s.rows.length });
     try {
@@ -132,7 +134,7 @@ export default function ImportStart() {
                 <tbody>
                   {file.sheets.map((s, i) => (
                     <tr key={s.name} className="border-b border-rule-2 last:border-0">
-                      <td className="px-4 py-2.5"><div className="font-medium">{s.name}</div><div className="max-w-[340px] truncate text-[12px] text-ink-3" title={s.headers.join(", ")}>{s.headers.slice(0, 6).join(", ")}{s.headers.length > 6 ? "…" : ""}</div></td>
+                      <td className="px-4 py-2.5"><div className="font-medium">{s.name}</div><div className="max-w-[340px] truncate text-[12px] text-ink-3" title={s.headers.join(", ")}>{s.headers.slice(0, 6).join(", ")}{s.headers.length > 6 ? "…" : ""}</div>{s.blocked && <p className="mt-1 max-w-[340px] text-[12px] text-red" role="status">{s.blocked}</p>}</td>
                       <td className="num px-4 py-2.5 text-ink-2">{s.rows.length.toLocaleString()}</td>
                       <td className="px-4 py-2.5">
                         <select className="field max-w-[230px]" value={s.choice} onChange={(e) => setFile({ ...file, sheets: file.sheets.map((x, j) => (j === i ? { ...x, choice: e.target.value } : x)) })}>
@@ -145,7 +147,7 @@ export default function ImportStart() {
                       <td className="px-4 py-2.5 text-right">
                         {upload?.sheet === s.name
                           ? <div className="w-[160px]"><Progress value={(upload.done / Math.max(1, upload.total)) * 100} live /><div className="mt-1 text-[11.5px] text-ink-3">Uploading {upload.done.toLocaleString()} of {upload.total.toLocaleString()}</div></div>
-                          : <Button variant="primary" size="sm" disabled={!s.choice || !!upload} onClick={() => start(s)}>Import this sheet <ArrowRight className="size-3.5" /></Button>}
+                          : <Button variant="primary" size="sm" disabled={!s.choice || !!upload || !!s.blocked} onClick={() => start(s)}>Import this sheet <ArrowRight className="size-3.5" /></Button>}
                       </td>
                     </tr>
                   ))}
@@ -219,3 +221,4 @@ export default function ImportStart() {
     </>
   );
 }
+

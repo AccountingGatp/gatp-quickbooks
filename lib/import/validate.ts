@@ -7,20 +7,23 @@ import { query, escapeQ } from "../qbo/client";
 import { entityDef, normType, type BuildCtx, type EntityDef, type OpenBill, type Vals } from "./entities";
 import { KIND_LABEL, Resolver, norm } from "./resolver";
 import { DEFAULT_SETTINGS, type Counts, type ImportSettings, type Issue, type JobDoc, type ListKind, type RowDoc, type RuleDoc } from "../types";
+import { groupKey, inheritIdentity, headerIssues, unsupportedSheetAction } from "./grouping";
+import { dupKey, DOC_TYPES } from "./duplicates";
+export { groupKey } from "./grouping";
 
 export const STATEMENTS = new Set(["bank-statement", "card-statement"]);
 
-/** Unpaid bills by vendor (last 3 years), for bank lines that pay a bill. */
+/** Unpaid bills by vendor, for bank lines that pay a bill. Never silently ignore older bills. */
 export async function loadOpenBills(realmId: string): Promise<Map<string, OpenBill[]>> {
-  const since = new Date(Date.now() - 3 * 365 * 864e5).toISOString().slice(0, 10);
   const out = new Map<string, OpenBill[]>();
-  for (let start = 1; start < 50_000; start += 1000) {
-    const rows = (await query(realmId, `select * from Bill where TxnDate >= '${since}' startposition ${start} maxresults 1000`)).Bill || [];
+  for (let start = 1; ; start += 1000) {
+    const rows = (await query(realmId, `select * from Bill startposition ${start} maxresults 1000`)).Bill || [];
     for (const b of rows) {
       const bal = Number(b.Balance ?? 0);
       if (bal > 0.004 && b.VendorRef?.value) out.set(b.VendorRef.value, [...(out.get(b.VendorRef.value) || []), { id: String(b.Id), balance: bal, date: b.TxnDate, docNumber: b.DocNumber }]);
     }
     if (rows.length < 1000) break;
+    if (start >= 99_001) throw new Error("Too many bills to match safely. Use a Bill payments file with explicit Bill No values.");
   }
   return out;
 }
@@ -55,11 +58,6 @@ export function fillGroup(def: EntityDef, rows: Vals[]): Vals[] {
     for (const k of head) if ((out[k] == null || out[k] === "") && first[k] != null) out[k] = first[k];
     return out;
   });
-}
-
-export function groupKey(def: EntityDef, values: Vals, idx: number) {
-  const g = def.groupBy ? String(values[def.groupBy] ?? "").trim() : "";
-  return g ? `g:${norm(g)}` : `r:${idx}`;
 }
 
 function normalise(def: EntityDef, raw: Vals, fmt: ImportSettings["dateFormat"]): { values: Vals; issues: Issue[] } {
@@ -128,26 +126,10 @@ function suggest(r: Resolver, kind: ListKind, value: string) {
   return best ? ` Did you mean “${best.name}”?` : "";
 }
 
-function txnTotal(entity: string, body: any): number {
-  if (entity === "Transfer") return round2(Number(body.Amount || 0));
-  const lines: any[] = body.Line || [];
-  if (entity === "JournalEntry") return round2(lines.filter((l) => l.JournalEntryLineDetail?.PostingType === "Debit").reduce((s, l) => s + Number(l.Amount || 0), 0));
-  return round2(lines.reduce((s, l) => s + Number(l.Amount || 0), 0));
-}
-
-function dupKey(entity: string, b: any) {
-  const total = txnTotal(entity, b).toFixed(2);
-  if (entity === "Purchase") return `P|${b.AccountRef?.value}|${b.TxnDate}|${total}|${b.Credit ? 1 : 0}`;
-  if (entity === "Deposit") return `D|${b.DepositToAccountRef?.value}|${b.TxnDate}|${total}`;
-  if (entity === "Transfer") return `T|${b.FromAccountRef?.value}|${b.ToAccountRef?.value}|${b.TxnDate}|${total}`;
-  if (entity === "BillPayment") return `B|${b.CheckPayment?.BankAccountRef?.value || b.CreditCardPayment?.CCAccountRef?.value}|${b.TxnDate}|${total}`;
-  return null;
-}
-const DOC_TYPES = new Set(["Bill", "Invoice", "Estimate", "SalesReceipt", "CreditMemo", "RefundReceipt", "PurchaseOrder", "VendorCredit", "JournalEntry", "BillPayment"]);
 const fmtMoney = (n: number) => "$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const usDate = (d?: string) => (d && /^\d{4}-\d{2}-\d{2}/.test(d) ? `${d.slice(5, 7)}/${d.slice(8, 10)}/${d.slice(0, 4)}` : d || "");
 const partyOf = (b: any) => b.VendorRef?.value || b.CustomerRef?.value || "";
-const LABEL: Record<string, string> = { Purchase: "Expense", Deposit: "Deposit", Transfer: "Transfer", Bill: "Bill", Invoice: "Invoice", Estimate: "Estimate", SalesReceipt: "Sales receipt", CreditMemo: "Credit memo", RefundReceipt: "Refund receipt", PurchaseOrder: "Purchase order", VendorCredit: "Vendor credit", JournalEntry: "Journal entry", BillPayment: "Bill payment" };
+const LABEL: Record<string, string> = { Purchase: "Expense", Deposit: "Deposit", Transfer: "Transfer", Bill: "Bill", Invoice: "Invoice", Estimate: "Estimate", SalesReceipt: "Sales receipt", CreditMemo: "Credit memo", RefundReceipt: "Refund receipt", PurchaseOrder: "Purchase order", VendorCredit: "Vendor credit", JournalEntry: "Journal entry", BillPayment: "Bill payment", Payment: "Receive payment", TimeActivity: "Time activity" };
 
 async function chunked<T>(items: T[], n: number, fn: (part: T[]) => Promise<void>) {
   for (let i = 0; i < items.length; i += n) await fn(items.slice(i, i + n));
@@ -156,10 +138,13 @@ async function chunked<T>(items: T[], n: number, fn: (part: T[]) => Promise<void
 export type ValidateResult = { counts: Counts; pendingNames: { kind: string; name: string }[] };
 
 /** Check the whole import (or only some transactions, after edits). */
-export async function validateJob(jobId: string, only?: Set<string>): Promise<ValidateResult> {
+export async function validateJob(jobId: string, only?: Set<string>, alreadyLocked = false): Promise<ValidateResult> {
   const J = await jobs(), Rw = await jobRows();
   const job = await J.findOne({ _id: new ObjectId(jobId) });
   if (!job) throw new Error("Import not found.");
+  const unsupported = unsupportedSheetAction(job.sheetName || "");
+  if (unsupported) throw new Error(unsupported);
+  if (!alreadyLocked && (job.status === "posting" || (job.lockUntil || 0) > Date.now())) throw new Error("Wait for posting or undo to finish before checking this import again.");
   const def = entityDef(job.entity);
   const settings = await jobSettings(job);
   const r = new Resolver(job.realmId, settings);
@@ -177,6 +162,8 @@ export async function validateJob(jobId: string, only?: Set<string>): Promise<Va
     const { values, issues } = normalise(def, src, settings.dateFormat);
     return { row, values, issues, keep: false };
   });
+  const identities = inheritIdentity(def, prepared.map((p) => p.values), prepared.map((p) => p.row.status === "skipped"));
+  prepared.forEach((p, i) => { if (!p.keep) p.values = identities[i]; });
   const groups = new Map<string, typeof prepared>();
   for (const p of prepared) {
     const g = groupKey(def, p.values, p.row.idx);
@@ -199,6 +186,8 @@ export async function validateJob(jobId: string, only?: Set<string>): Promise<Va
     if (only && !only.has(g)) continue;
     const live = items.filter((p) => !p.keep && p.row.status !== "skipped");
     if (!live.length) continue;
+    const conflicts = headerIssues(def, live.map((p) => p.values));
+    for (const p of live) p.issues.push(...conflicts);
     const filled = fillGroup(def, live.map((p) => p.values));
     live.forEach((p, i) => {
       p.values = filled[i];
@@ -374,16 +363,17 @@ export async function validateJob(jobId: string, only?: Set<string>): Promise<Va
   // names that will be created when posting (merged with earlier checks when only some rows were re-checked)
   const fresh = [...r.pending.values()];
   const merged = only ? [...new Map([...(job.newNames || []), ...fresh].map((n) => [`${n.kind}|${norm(n.name)}`, n])).values()] : fresh;
-  await J.updateOne({ _id: job._id }, { $set: { counts, fieldsUsed: [...used], newNames: merged.slice(0, 500), validatedAt: new Date(), updatedAt: new Date(), ...(["mapping", "review"].includes(job.status) ? { status: "review" } : {}) } });
+  await J.updateOne({ _id: job._id }, { $set: { counts, fieldsUsed: [...used], newNames: merged.slice(0, 500), validatedAt: new Date(), validationVersion: 2, updatedAt: new Date(), ...(["mapping", "review"].includes(job.status) ? { status: "review" } : {}) } });
   return { counts, pendingNames: merged };
 }
 
 async function queryAllDates(realmId: string, entity: string, from: string, to: string) {
   const out: any[] = [];
-  for (let start = 1; start < 20_000; start += 1000) {
+  for (let start = 1; ; start += 1000) {
     const rows = (await query(realmId, `select * from ${entity} where TxnDate >= '${from}' and TxnDate <= '${to}' startposition ${start} maxresults 1000`))[entity] || [];
     out.push(...rows);
     if (rows.length < 1000) break;
+    if (out.length >= 100_000) throw new Error("Too many existing transactions to check duplicates safely. Split this import into smaller date ranges.");
   }
   return out;
 }
@@ -405,3 +395,4 @@ export async function recount(jobId: string): Promise<Counts> {
   c.transactions = groups.size;
   return c;
 }
+

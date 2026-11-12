@@ -22,7 +22,7 @@ export class Resolver {
   constructor(public realmId: string, public settings: ImportSettings) {}
 
   async load(kinds: ListKind[], fresh = false) {
-    await Promise.all(kinds.filter((k) => !this.loaded.has(k)).map(async (k) => {
+    await Promise.all(kinds.filter((k) => fresh || !this.loaded.has(k)).map(async (k) => {
       const items = await getList(this.realmId, k, fresh);
       this.loaded.set(k, items);
       const m = new Map<string, ListItem>();
@@ -117,3 +117,4 @@ export class Resolver {
     return this.byId("Account", id)?.type || "";
   }
 }
+

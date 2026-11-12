@@ -14,7 +14,7 @@ export async function getJob(id: string): Promise<JobDoc> {
 }
 
 export function publicJob(j: JobDoc) {
-  const { lockUntil, ...rest } = j;
+  const { lockUntil, lockToken, ...rest } = j;
   return { ...rest, _id: String(j._id), busy: !!lockUntil && lockUntil > Date.now() };
 }
 
@@ -30,3 +30,4 @@ export const fromRaw = (headers: string[], raw: Record<string, unknown> = {}) =>
   headers.forEach((h, i) => { if (raw["c" + i] != null) out[h] = raw["c" + i]; });
   return out;
 };
+

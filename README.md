@@ -14,12 +14,12 @@ Built with Next.js 15 (App Router), MongoDB and the QuickBooks Online Accounting
 | **Import** | Excel (.xlsx .xls .xlsm .xlsb), CSV, TSV, TXT, OpenDocument, Google Sheets links. Header row found automatically (bank exports with text on top work). SaasAnt template files are recognised sheet by sheet. |
 | **Import types (27)** | Bank statement, credit card statement, expenses, checks, card credits, deposits, transfers, card payments, bills, bill payments, vendor credits, purchase orders, invoices, estimates, sales receipts, credit memos, refund receipts, receive payments, journal entries, trial balance, time activities, customers, vendors, employees, products & services, chart of accounts, classes, locations. |
 | **Column matching** | Automatic by column title (SaasAnt names + common bank names), saved per file layout and reused next time. Any field can be given one fixed value for every row (for example the bank account). |
-| **Review** | Every row checked before posting: dates, numbers, required fields, names matched to QuickBooks (with "did you mean"), inactive records, journal balance, bills/invoices being paid, and duplicates (same account + date + amount, or same document number) — duplicates are left out unless you include them. Edit any cell in the grid, fill a column for many rows at once, leave rows out. |
+| **Review** | Every row checked before posting: dates, numbers, required fields, names matched to QuickBooks (with "did you mean"), inactive records, journal balance, conflicting transaction headers, bills/invoices being paid, and duplicates (same account + date + amount, or same document number) — duplicates are left out unless you include them. Edit any cell in the grid, fill a column for many rows at once, leave rows out. |
 | **Bank rules** | "Description contains UBER → account Travel, payee Uber". Per company or for all companies. First match wins; only empty cells are filled. |
-| **Posting** | QuickBooks batch API (30 per call), in ~40-second chunks so it fits Vercel limits. Every chunk has an idempotency `requestid`, so retries never create duplicates. Missing vendors/customers/classes/locations/payment methods are created first (option). Rows with errors are left out; the rest are posted. |
-| **Undo** | Deletes everything an import posted (list records are made inactive, since QuickBooks never deletes names). |
+| **Posting** | QuickBooks batch API (30 per call), in ~40-second chunks. Transaction payloads and request IDs are saved before sending, and results before row updates, so interrupted requests resume with the identical payload. Posting is serialized per company and re-checks duplicates before starting. Older uncertain imports without a saved payload are blocked for review. Missing vendors/customers/classes/locations/payment methods are created first (option). Rows with errors are left out; the rest are posted. |
+| **Undo** | Deletes records an import posted (imported list records are made inactive). Records changed later in QuickBooks are preserved and reported for review. Automatically created reference names stay active because other transactions may now use them. |
 | **Export** | Any transaction type or list, by transaction date / date added / date changed, to Excel or CSV (one row per line). |
-| **Delete** | Find, select, confirm by typing DELETE. A backup Excel file downloads first, and the full records are kept in MongoDB. |
+| **Delete** | Find, select, confirm by typing DELETE. A backup Excel file downloads first. Full records are saved in MongoDB before deletion; a failed backup prevents the delete. Records changed after selection are preserved. |
 | **History & log** | Every import and delete with its rows and results; an activity log of who did what in which company. |
 | **Dashboard** | Last 30 days per company or all companies, imports waiting for review, companies that need reconnecting. |
 
@@ -42,8 +42,8 @@ Also understood:
 - QuickBooks register exports as input (title line gives the bank account; Memo = bank text; Payment / Deposit columns;
   Type = Deposit, Expense, Check, Transfer, Credit Card Pmt, Bill Payment).
 - Accounts written as "70000 Operating Expenses:70019 IT Services / Software" (names win over numbers, since numbers can repeat).
-- **Bill Payment** lines pay the vendor's unpaid bill(s) in QuickBooks (one bill with the same amount, or the oldest bills adding up to it)
-  instead of posting a second expense.
+- **Bill Payment** lines pay the vendor's unpaid bill(s) in QuickBooks (one uniquely matching bill, or all of the vendor’s remaining bills if their total matches)
+  instead of posting a second expense. Ambiguous matches require an explicit Bill No in a Bill payments file.
 
 ## Deploy (Vercel Pro + MongoDB Atlas)
 
@@ -84,6 +84,22 @@ npm run dev                    # http://localhost:3000
 
 `QB_MOCK=1` (demo mode) needs only MongoDB and the login variables. "Add demo companies" creates three fake client companies with accounts, vendors, customers and a few existing transactions, so every screen — including duplicate detection, posting and undo — can be tried safely.
 
+Local regression tests (no database, Intuit credentials or QuickBooks writes):
+
+```bash
+npm ci
+npm test
+npm run typecheck
+npm run build
+npm run test:files -- /private/path/to/test-file.xlsx
+```
+
+The file check parses, maps, groups and builds structural payloads using reference test doubles. It reports blocked sheets, missing fields, unresolved payment targets and duplicate files; it does not confirm actual QBO names, IDs, open balances, permissions or successful posting. Keep client spreadsheets outside this public repository.
+
+Sheets named **Modify / Update / Edit** or **Type Chg / Convert** are blocked in the UI and API because this app currently creates new records only. A modification sheet must never silently become a new import. New invoice sheets preserve positive and negative adjustment lines.
+
+Bank deposits from **Undeposited Funds** require the existing customer-payment links. A register export alone does not contain enough information to recreate those deposits, so they remain blocked. Complete or match them in QuickBooks; do not substitute an arbitrary income account.
+
 Engine test (imports every sheet of a SaasAnt template against the fake QuickBooks, posts and undoes):
 
 ```bash
@@ -106,7 +122,7 @@ components/         Shell (sidebar, company switcher), ui kit, import Mapping + 
 
 ### MongoDB collections
 
-`companies` (encrypted tokens, settings) · `jobs` (imports / deletes) · `job_rows` (each row: values, problems, result, QuickBooks id; delete backups) · `mappings` (saved column matching) · `rules` (bank rules) · `audit` (activity log) · `list_cache` (QuickBooks names, 15 min) · `mock_qbo` (demo mode only). Indexes are created automatically on first use.
+`companies` (encrypted tokens, settings, per-company posting lease) · `post_batches` (immutable posting requests and responses for recovery) · `jobs` (imports / deletes) · `job_rows` (each row: values, problems, result, QuickBooks id; delete backups) · `mappings` (saved column matching) · `rules` (bank rules) · `audit` (activity log) · `list_cache` (QuickBooks names, 15 min) · `mock_qbo` (demo mode only). Indexes are created automatically on first use.
 
 ## Not included yet
 
@@ -116,3 +132,4 @@ components/         Shell (sidebar, company switcher), ui kit, import Mapping + 
 - Per-person logins and roles (today: one shared login + name). Easy to add later with NextAuth or Clerk.
 
 Note: the `xlsx` package from npm (0.18.5) has published advisories for maliciously crafted files. Files come only from GATP staff, so the risk is low; to remove it, install SheetJS 0.20.x from `https://cdn.sheetjs.com` in `package.json`.
+

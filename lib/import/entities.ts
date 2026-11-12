@@ -186,10 +186,12 @@ const money2 = (n: number) => "$" + n.toLocaleString("en-US", { minimumFractionD
 function matchBills(c: BuildCtx, vendorId: string, vendorName: string, amt: number) {
   const all = (c.openBills?.get(vendorId) || []).filter((b) => !c.usedBills?.has(b.id)).sort((a, b) => a.date.localeCompare(b.date));
   const eq = (x: number) => Math.abs(x - amt) < 0.005;
-  let pick = all.filter((b) => eq(b.balance)).slice(0, 1);
+  const exact = all.filter((b) => eq(b.balance));
+  if (exact.length > 1) throw new Error(`${vendorName} has several unpaid bills for ${money2(amt)}. Use a Bill payments file with an explicit Bill No instead of guessing.`);
+  let pick = exact;
   if (!pick.length) {
-    let sum = 0;
-    for (let i = 0; i < all.length; i++) { sum = r2(sum + all[i].balance); if (eq(sum)) { pick = all.slice(0, i + 1); break; } if (sum > amt) break; }
+    // Only auto-apply a multi-bill payment when it settles every remaining bill.
+    if (all.length && eq(r2(all.reduce((total, b) => total + b.balance, 0)))) pick = all;
   }
   if (!pick.length) {
     if (!all.length) throw new Error(`${vendorName} has no unpaid bill in QuickBooks for this payment. Enter the bill first, or change the type to Expense.`);
@@ -258,11 +260,12 @@ function cardStatement(rows: Vals[], c: BuildCtx): Built {
   let type = normType(v.type);
   const catType = cat ? c.r.accountType(cat.value) : "";
   if (!type) type = n < 0 && catType === "Bank" ? "Transfer" : n < 0 ? "CreditCardCredit" : "Expense";
+  if (type === "Expense" && n < 0) type = "CreditCardCredit";
   const memo = [v.description, v.memo].filter(Boolean).join(" — ").slice(0, 4000) || undefined;
   const base = clean({ TxnDate: v.date, PrivateNote: memo, DepartmentRef: R_(ref(c, "Department", v.location)) });
   if (type === "Transfer") {
     const bank = ref(c, "Account", v.bankAccount) || cat;
-    return { entity: "Transfer", label: "Card payment", body: { ...base, Amount: amt, FromAccountRef: R_(bank), ToAccountRef: R_(card) } };
+    return { entity: "Transfer", label: "Card transfer", body: { ...base, Amount: amt, FromAccountRef: R_(n < 0 ? bank : card), ToAccountRef: R_(n < 0 ? card : bank) } };
   }
   return {
     entity: "Purchase", label: type === "CreditCardCredit" ? "Card credit" : "Card expense",
@@ -276,8 +279,11 @@ function statementCheck(rows: Vals[], c: BuildCtx, cc: boolean): Issue[] {
   if (v.amount == null && v.debit == null && v.credit == null) out.push({ field: "amount", level: "error", msg: "Amount is missing" });
   else if (signed(v, c, cc) === 0) out.push({ field: "amount", level: "error", msg: "Amount is 0" });
   const t = normType(v.type);
+  if (Math.abs(num(v.debit) || 0) > 0 && Math.abs(num(v.credit) || 0) > 0)
+    out.push({ field: "amount", level: "error", msg: "Both debit and credit have amounts. Use a single signed amount or only one side per statement line." });
   if (t === "BillPayment" && !cc) {
     if (!v.payee) out.push({ field: "payee", level: "error", msg: "A bill payment needs the vendor in Payee" });
+    if (signed(v, c, false) > 0) out.push({ field: "amount", level: "error", msg: "A bill payment must be money leaving the bank. Correct the sign or transaction type." });
     return out;
   }
   if (!v.category && !(t === "Transfer" && v.bankAccount && cc)) out.push({ field: "category", level: "error", msg: "Choose an account (category) — or add a bank rule that sets it" });
@@ -286,7 +292,7 @@ function statementCheck(rows: Vals[], c: BuildCtx, cc: boolean): Issue[] {
   const catHit = v.category ? c.r.find("Account", v.category) : null;
   const moneyIn = !cc && (v.amount != null || v.debit != null || v.credit != null) && signed(v, c, cc) > 0;
   if (catHit?.item?.subType === "UndepositedFunds" && moneyIn && t !== "Transfer")
-    out.push({ field: "category", level: "error", msg: `QuickBooks won’t post a bank deposit from “${catHit.name}”: that account only empties by linking the customer payments waiting in it. Choose the account this money really comes from (an income or clearing account).` });
+    out.push({ field: "category", level: "error", msg: `A deposit from “${catHit.name}” needs its existing customer-payment links. A register line does not contain those links; create or match this deposit in QuickBooks.` });
   const ok = cc ? ["Expense", "Transfer", "CreditCardCredit"] : ["Expense", "Check", "Deposit", "Transfer", "BillPayment"];
   if (t && !ok.includes(t))
     out.push({ field: "type", level: "error", msg: `Transaction type “${v.type}” cannot come from a ${cc ? "card" : "bank"} line here. Use ${cc ? "Expense, CreditCardCredit or Transfer" : "Expense, Check, Deposit, Transfer or Bill Payment"}.` });
@@ -484,7 +490,9 @@ export const ENTITIES: EntityDef[] = [
       const vendor = ref(c, "Vendor", v.vendor)!;
       const cc = c.r.accountType(acct.value) === "Credit Card";
       const lines = rows.map((x) => {
-        const bill = x.billNo ? (c.docs.get(`Bill|${x.billNo.toLowerCase()}`) || []).find((b) => !b.party || b.party === vendor.value) : undefined;
+        const matches = x.billNo ? (c.docs.get(`Bill|${x.billNo.toLowerCase()}`) || []).filter((b) => !b.party || b.party === vendor.value) : [];
+        if (matches.length > 1) throw new Error(`Several bills numbered ${x.billNo} exist for ${vendor.name}. Resolve the duplicate bill numbers in QuickBooks before importing this payment.`);
+        const bill = matches[0];
         if (x.billNo && !bill) throw new Error(`Bill ${x.billNo} for ${vendor.name} was not found in QuickBooks`);
         return clean({ Amount: r2(num(x.amount) || 0), LinkedTxn: bill ? [{ TxnId: bill.id, TxnType: "Bill" }] : undefined });
       });
@@ -545,7 +553,9 @@ export const ENTITIES: EntityDef[] = [
       const v = rows[0];
       const cust = ref(c, "Customer", v.customer)!;
       const lines = rows.filter((x) => x.invoiceNo).map((x) => {
-        const inv = (c.docs.get(`Invoice|${x.invoiceNo.toLowerCase()}`) || []).find((b) => !b.party || b.party === cust.value);
+        const matches = (c.docs.get(`Invoice|${x.invoiceNo.toLowerCase()}`) || []).filter((b) => !b.party || b.party === cust.value);
+        if (matches.length > 1) throw new Error(`Several invoices numbered ${x.invoiceNo} exist for ${cust.name}. Resolve the duplicate invoice numbers before importing this payment.`);
+        const inv = matches[0];
         if (!inv) throw new Error(`Invoice ${x.invoiceNo} for ${cust.name} was not found in QuickBooks`);
         return { Amount: r2(num(x.amount) || 0), LinkedTxn: [{ TxnId: inv.id, TxnType: "Invoice" }] };
       });
@@ -856,3 +866,4 @@ export function catalog() {
   }));
 }
 export type CatalogEntity = ReturnType<typeof catalog>[number];
+
