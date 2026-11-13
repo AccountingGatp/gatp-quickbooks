@@ -11,7 +11,7 @@ export type ShellCompany = { realmId: string; name: string; environment: string;
 
 const NAV = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/import", label: "Import", icon: Upload },
+  { href: "/import", label: "New Import", icon: Upload },
   { href: "/export", label: "Export", icon: Download },
   { href: "/delete", label: "Delete", icon: Trash2 },
   { href: "/history", label: "History", icon: History },
@@ -19,7 +19,7 @@ const NAV = [
 ];
 const NAV2 = [
   { href: "/companies", label: "Companies", icon: Building2 },
-  { href: "/settings", label: "Settings", icon: Settings2 },
+  { href: "/settings", label: "Import Settings", icon: Settings2 },
 ];
 
 export function Shell({ user, companies, active, mock, children }: { user: string; companies: ShellCompany[]; active: string | null; mock: boolean; children: ReactNode }) {
@@ -139,3 +139,4 @@ function CompanySwitcher({ companies, active }: { companies: ShellCompany[]; act
 }
 
 export const initials = (n: string) => n.replace(/[^A-Za-z0-9 ]/g, "").split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase() || "?";
+

@@ -3,6 +3,7 @@ import { ObjectId } from "mongodb";
 import { jobs } from "./db";
 import { HttpError } from "./http";
 import type { Counts, JobDoc } from "./types";
+import { ENTITY_LABELS } from "./terminology";
 
 export const EMPTY_COUNTS: Counts = { total: 0, ready: 0, error: 0, warning: 0, skipped: 0, posted: 0, failed: 0, rolledBack: 0, transactions: 0 };
 
@@ -15,7 +16,7 @@ export async function getJob(id: string): Promise<JobDoc> {
 
 export function publicJob(j: JobDoc) {
   const { lockUntil, lockToken, ...rest } = j;
-  return { ...rest, _id: String(j._id), busy: !!lockUntil && lockUntil > Date.now() };
+  return { ...rest, entityLabel: ENTITY_LABELS[j.entity] || j.entityLabel, _id: String(j._id), busy: !!lockUntil && lockUntil > Date.now() };
 }
 
 // Row data is stored by column position ("c0", "c1", …), because column titles such as "Ref No." or "$ Amount"

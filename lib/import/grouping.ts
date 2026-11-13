@@ -6,7 +6,8 @@ const norm = (v: unknown) => String(v ?? "").normalize("NFKC").trim().toLowerCas
 const identityFields = (def: EntityDef) => ["vendor", "customer", "payee", "account", "apAccount"].filter((k) => def.fields.some((f) => f.key === k && !f.line));
 
 /** Document numbers are only unique within a party/payment account, never across all vendors. */
-export function groupKey(def: EntityDef, values: Vals, idx: number) {
+export function groupKey(def: EntityDef, values: Vals, idx: number, individual = false) {
+  if (individual) return `r:${idx}`;
   const doc = values.qboId ? `id:${norm(values.qboId)}` : def.groupBy ? norm(values[def.groupBy]) : "";
   return doc ? `g:${JSON.stringify([doc, ...identityFields(def).map((k) => norm(values[k]))])}` : `r:${idx}`;
 }

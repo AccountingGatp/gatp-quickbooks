@@ -53,3 +53,51 @@ test("a successful recheck clears old posting errors", async () => {
   assert.equal((await validateJob(String(job._id))).counts.ready, 1);
   assert.equal(rows[0].error, undefined);
 });
+
+test("individual transaction processing does not group repeated document numbers", async () => {
+  job.settings.processEachLine = true;
+  for (const amount of ["10", "20"]) add({ docNumber: "I-1", customer: "Customer", date: "2026-11-01", item: "Service", amount });
+  const result = await validateJob(String(job._id));
+  assert.equal(result.counts.ready, 2); assert.equal(result.counts.transactions, 2);
+  assert.notEqual(rows[0].group, rows[1].group);
+});
+
+test("individual transactions never inherit a prior row's missing customer", async () => {
+  job.settings.processEachLine = true;
+  add({ docNumber: "I-1", customer: "Customer", date: "2026-11-01", item: "Service", amount: "10" });
+  add({ docNumber: "I-1", date: "2026-11-01", item: "Service", amount: "20" });
+  const result = await validateJob(String(job._id));
+  assert.equal(result.counts.ready, 1); assert.equal(result.counts.error, 1);
+});
+
+test("zero transactions are skipped without creating names and rechecked when disabled", async () => {
+  job.settings.skipZero = true;
+  add({ customer: "New customer", date: "2026-11-01", item: "Service", amount: "0" });
+  assert.equal((await validateJob(String(job._id))).counts.skipped, 1);
+  assert.deepEqual(job.newNames, []); assert.equal(rows[0].skipReason, "zero");
+  job.settings.skipZero = false;
+  assert.equal((await validateJob(String(job._id))).counts.ready, 1);
+  assert.equal(rows[0].skipReason, undefined);
+});
+
+test("negative conversion applies to Expense/Checks without reversing bank statement direction", async () => {
+  job.entity = "expenses"; job.settings.negativeToPositive = true;
+  add({ date: "2026-11-01", amount: "-20", account: "Missing bank", category: "Missing expense" });
+  await validateJob(String(job._id)); assert.equal(rows[0].values.amount, "20");
+  assert(rows[0].issues.some((i: any) => /converted to positive/.test(i.msg)));
+  job.entity = "bank-statement"; rows[0].values = { date: "2026-11-01", amount: "-20", bankAccount: "Missing bank", category: "Missing expense" };
+  await validateJob(String(job._id)); assert.equal(rows[0].values.amount, "-20");
+});
+
+test("text truncation can be disabled to block overlong reference numbers", async () => {
+  job.settings.truncateText = false;
+  add({ docNumber: "A".repeat(30), customer: "Customer", date: "2026-11-01", item: "Service", amount: "20" });
+  assert.equal((await validateJob(String(job._id))).counts.error, 1);
+  assert.equal(rows[0].values.docNumber.length, 30);
+  assert(rows[0].issues.some((i: any) => /Shorten it/.test(i.msg)));
+});
+
+test("Modify refuses individual-line replacement before changing existing records", async () => {
+  job.operation = "update"; job.settings.processEachLine = true;
+  await assert.rejects(validateJob(String(job._id)), /Modify requires complete transactions/);
+});

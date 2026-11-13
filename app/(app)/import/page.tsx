@@ -104,19 +104,19 @@ export default function ImportStart() {
   if (company === undefined) return <div className="py-20 text-center"><Spinner /></div>;
   if (company === null) return (
     <>
-      <PageHeader title="Import" />
+      <PageHeader title="New Import" />
       <Panel><Empty icon={<Building2 className="size-8" />} title="Choose a client company first" action={<Link href="/companies"><Button variant="primary">Open companies</Button></Link>}>Imports always go into the company shown at the top of the page. Pick one there, or connect a new one.</Empty></Panel>
     </>
   );
 
   return (
     <>
-      <PageHeader icon={<Upload />} title="Import" sub={<>Upload a spreadsheet, check every line, then post it to <b className="font-semibold text-ink">{company.name}</b>.</>} />
+      <PageHeader icon={<Upload />} title="New Import" sub={<>Upload a spreadsheet, check every line, then post it to <b className="font-semibold text-ink">{company.name}</b>.</>} />
 
-      <Panel title="Import action">
-        <label className="flex items-center gap-3 text-[13.5px]">Action
+      <Panel title="Operation">
+        <label className="flex items-center gap-3 text-[13.5px]">Operation
           <select className="field max-w-[300px]" value={operation} onChange={(e) => setOperation(e.target.value as "create" | "update")}>
-            <option value="create">Create new records</option><option value="update">Update existing invoices / credit memos</option>
+            <option value="create">Import</option><option value="update">Modify (Invoices / Credit Memos)</option>
           </select>
         </label>
         <p className="mt-2 text-[12.5px] text-ink-3">Update matches a QuickBooks ID or a unique document number and customer. Include every product/service line. Paid, applied, taxed or complex records are held back. Sheets named Modify, Update or Edit always use update mode.</p>
@@ -161,7 +161,7 @@ export default function ImportStart() {
                       <td className="px-4 py-2.5 text-right">
                         {upload?.sheet === s.name
                           ? <div className="w-[160px]"><Progress value={(upload.done / Math.max(1, upload.total)) * 100} live /><div className="mt-1 text-[11.5px] text-ink-3">Uploading {upload.done.toLocaleString()} of {upload.total.toLocaleString()}</div></div>
-                          : <Button variant="primary" size="sm" disabled={!s.choice || !!upload || !!blockedFor(s)} onClick={() => start(s)}>Import this sheet <ArrowRight className="size-3.5" /></Button>}
+                          : <Button variant="primary" size="sm" disabled={!s.choice || !!upload || !!blockedFor(s)} onClick={() => start(s)}>Let’s import <ArrowRight className="size-3.5" /></Button>}
                       </td>
                     </tr>
                   ))}
@@ -170,7 +170,7 @@ export default function ImportStart() {
             </Panel>
           )}
           {/* what */}
-          <Panel title={file ? "What the file contains" : "What are you importing?"} actions={chosen && <Button size="sm" variant="ghost" icon={<Download className="size-3.5" />} onClick={() => template(chosen)}>Blank template</Button>}>
+          <Panel title="Select QuickBooks Entity" actions={chosen && <Button size="sm" variant="ghost" icon={<Download className="size-3.5" />} onClick={() => template(chosen)}>Blank template</Button>}>
             <button onClick={() => setType("auto")} className={cx("mb-5 flex w-full items-center gap-3 rounded-[var(--radius-md)] border px-3.5 py-3 text-left transition-colors", type === "auto" ? "border-green bg-green-soft ring-1 ring-green" : "border-rule hover:border-green-line")}>
               <IconChip tone="green"><Sparkles /></IconChip>
               <span><span className="block text-[13.5px] font-semibold">Work it out from the file</span><span className="block text-[12.5px] text-ink-3">Reads the sheet names and column titles. SaasAnt template files are recognised sheet by sheet.</span></span>
@@ -205,9 +205,9 @@ export default function ImportStart() {
             <ol className="space-y-3 text-[13px] text-ink-2">
               {[
                 ["Upload", "Any spreadsheet. Nothing reaches QuickBooks yet."],
-                ["Match columns", "Done for you when the column titles are known; saved for next time."],
-                ["Review", "Every row is checked against the company’s accounts, names and existing transactions. Fix cells right in the grid."],
-                ["Post", "Ready rows go to QuickBooks. You can undo the whole import afterwards."],
+                ["Mapping", "Done for you when the column titles are known; saved for next time."],
+                ["Preview Mapping", "Every row is checked against the company’s accounts, names and existing transactions. Fix cells right in the grid."],
+                ["Import to QuickBooks", "Ready rows go to QuickBooks. You can undo the whole import afterwards."],
               ].map(([t, d], i) => (
                 <li key={t} className="flex gap-3">
                   <span className="num mt-px grid size-5 shrink-0 place-items-center rounded-full border border-green-line bg-green-soft text-[11px] font-semibold text-green">{i + 1}</span>

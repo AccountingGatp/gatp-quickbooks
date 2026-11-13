@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { Copy, CheckCircle2, XCircle, Settings2 } from "lucide-react";
 import { Button, Label, PageHeader, Panel, Spinner, Toggle, useToast } from "@/components/ui";
 import { api } from "@/lib/client";
+import { SETTING_LABELS } from "@/lib/terminology";
 import type { ImportSettings } from "@/lib/types";
 
 export default function SettingsPage() {
@@ -25,22 +26,26 @@ export default function SettingsPage() {
 
   return (
     <>
-      <PageHeader icon={<Settings2 />} tone="gray" title="Settings" />
+      <PageHeader icon={<Settings2 />} tone="gray" title="Import Settings" />
       <div className="grid gap-5 xl:grid-cols-2">
-        <Panel title={co ? `Import options for ${co}` : "Import options"}>
+        <Panel title={co ? `Import Settings for ${co}` : "Import Settings"}>
           {!s ? <p className="text-[13.5px] text-ink-3">Choose a company at the top to set its default import options.</p> : (
             <div className="space-y-4">
               <p className="text-[13px] text-ink-3">New imports for this company start with these options. Each import can still change them on the Match columns step.</p>
-              <div className="max-w-[340px]"><Label>Dates in files are written</Label>
+              <div className="max-w-[340px]"><Label>{SETTING_LABELS.dateFormat}</Label>
                 <select className="field" value={s.dateFormat} onChange={(e) => set("dateFormat", e.target.value)}>
                   <option value="auto">Work it out (US month/day first)</option><option value="MDY">Month / day / year</option><option value="DMY">Day / month / year</option><option value="YMD">Year-month-day</option>
                 </select></div>
-              <Toggle checked={s.autoCreate} onChange={(v) => set("autoCreate", v)} label="Create missing names" help="Vendors, customers, classes, locations and payment methods." />
+              <Toggle checked={s.autoCreate} onChange={(v) => set("autoCreate", v)} label={SETTING_LABELS.autoCreate} help="Vendors, customers, classes, locations and payment methods." />
               <Toggle checked={s.duplicateCheck} onChange={(v) => set("duplicateCheck", v)} label="Look for duplicates before posting" />
-              <Toggle checked={s.useFileRefNo} onChange={(v) => set("useFileRefNo", v)} label="Keep reference numbers from the file" />
+              <Toggle checked={s.useFileRefNo} onChange={(v) => set("useFileRefNo", v)} label={SETTING_LABELS.useFileRefNo} />
               <Toggle checked={s.applyRules} onChange={(v) => set("applyRules", v)} label="Apply bank rules to statements" />
               <Toggle checked={s.matchAccountByNumber} onChange={(v) => set("matchAccountByNumber", v)} label="Accounts can be given by number" />
-              <Button variant="primary" loading={busy} onClick={save}>Save options</Button>
+              <Toggle checked={s.processEachLine} onChange={(v) => set("processEachLine", v)} label={SETTING_LABELS.processEachLine} help="Modify uses complete transactions and requires this option off." />
+              <Toggle checked={s.skipZero} onChange={(v) => set("skipZero", v)} label={SETTING_LABELS.skipZero} />
+              <Toggle checked={s.negativeToPositive} onChange={(v) => set("negativeToPositive", v)} label={SETTING_LABELS.negativeToPositive} help="Applies only to Expense and Checks imports; never changes statement money direction." />
+              <Toggle checked={s.truncateText} onChange={(v) => set("truncateText", v)} label={SETTING_LABELS.truncateText} />
+              <Button variant="primary" loading={busy} onClick={save}>Save Settings</Button>
             </div>
           )}
         </Panel>
@@ -72,3 +77,4 @@ export default function SettingsPage() {
     </>
   );
 }
+

@@ -6,6 +6,7 @@ import { statementMappingIssue } from "@/lib/import/automap";
 import { api } from "@/lib/client";
 import { assignColumn, mappingForType } from "@/lib/import/mapping";
 import type { CatalogEntity } from "@/lib/import/entities";
+import { SETTING_LABELS } from "@/lib/terminology";
 import type { ImportSettings } from "@/lib/types";
 import { RefLists, accountListId, type Lists } from "./RefLists";
 
@@ -119,8 +120,8 @@ export function Mapping({ cat, headers, samples, initial, saved, lists, busy, on
 
   return (
     <>
-    <Panel title="What does this worksheet contain?">
-      <label htmlFor="mapping-import-type" className="mb-2 block text-[13px] font-medium">Transaction / list type</label>
+    <Panel title="Select QuickBooks Entity">
+      <label htmlFor="mapping-import-type" className="mb-2 block text-[13px] font-medium">QuickBooks Entity</label>
       <select id="mapping-import-type" className="field max-w-[360px]" disabled={busy} value={m.entity} onChange={(e) => changeEntity(e.target.value)}>
         {["Banking", "Purchases", "Sales", "Accounting", "Lists"].map((g) => <optgroup key={g} label={g}>{cat.filter((e) => e.group === g).map((e) => <option key={e.key} value={e.key}>{e.label}</option>)}</optgroup>)}
       </select>
@@ -131,13 +132,13 @@ export function Mapping({ cat, headers, samples, initial, saved, lists, busy, on
     <div className="mt-5 grid gap-5 xl:grid-cols-[1fr_320px]">
       <RefLists lists={lists} />
       <div className="space-y-5">
-        <Panel pad={false} title={`Map columns for ${def.label}`} actions={matching ? <Badge tone="blue">Matching {def.label.toLowerCase()}…</Badge> : matchingSaved
+        <Panel pad={false} title={`Mapping — ${def.label}`} actions={matching ? <Badge tone="blue">Matching {def.label.toLowerCase()}…</Badge> : matchingSaved
           ? <Badge tone="green"><Wand2 className="size-3" /> Saved {def.label.toLowerCase()} matching (by {matchingSaved.updatedBy})</Badge>
           : <Badge tone="blue"><Wand2 className="size-3" /> Matched for {def.label.toLowerCase()}</Badge>}>
           <p className="border-b border-rule-2 px-4 py-3 text-[12.5px] text-ink-3">{headers.length} columns read from your worksheet · {used.size} mapped. Your column titles and sample values appear on the left; choose the matching QuickBooks field on the right.</p>
           <table className="w-full table-fixed" aria-label={`${def.label} column mapping`}>
             <colgroup><col className="w-[45%]" /><col className="w-[55%]" /></colgroup>
-            <thead><tr className="border-b border-rule text-left text-[12px] text-ink-3"><th scope="col" className="px-4 py-2 font-medium">Your worksheet column · sample values</th><th scope="col" className="px-4 py-2 font-medium">QuickBooks {def.label.toLowerCase()} field</th></tr></thead>
+            <thead><tr className="border-b border-rule text-left text-[12px] text-ink-3"><th scope="col" className="px-4 py-2 font-medium">File Header</th><th scope="col" className="px-4 py-2 font-medium">QuickBooks Field</th></tr></thead>
             <tbody>{headers.map(columnRow)}</tbody>
           </table>
         </Panel>
@@ -150,7 +151,7 @@ export function Mapping({ cat, headers, samples, initial, saved, lists, busy, on
         </Panel>}
       </div>
       <aside className="space-y-5">
-        {def.groupBy && <Panel title="How lines are grouped"><p className="flex gap-1.5 text-[12.5px] text-ink-3"><Info className="mt-0.5 size-3.5 shrink-0" />Rows with the same {def.fields.find((f) => f.key === def.groupBy)?.label} become one transaction with several lines.</p></Panel>}
+        {def.groupBy && <Panel title="How lines are grouped"><p className="flex gap-1.5 text-[12.5px] text-ink-3"><Info className="mt-0.5 size-3.5 shrink-0" />{m.settings.processEachLine ? "Each file row is imported as an individual transaction. Required fields must be supplied on every row." : <>Rows with the same {def.fields.find((f) => f.key === def.groupBy)?.label} become one transaction with several lines.</>}</p></Panel>}
 
         {def.sign && (
           <Panel title="Amount signs">
@@ -167,10 +168,10 @@ export function Mapping({ cat, headers, samples, initial, saved, lists, busy, on
           </Panel>
         )}
 
-        <Panel title="Options">
+        <Panel title="Import Settings">
           <div className="space-y-3.5">
             <div>
-              <Label>Dates in the file are written</Label>
+              <Label>{SETTING_LABELS.dateFormat}</Label>
               <select className="field" value={m.settings.dateFormat} onChange={(e) => set("dateFormat", e.target.value as ImportSettings["dateFormat"])}>
                 <option value="auto">Work it out (US month/day first)</option>
                 <option value="MDY">Month / day / year (12/31/2025)</option>
@@ -178,10 +179,14 @@ export function Mapping({ cat, headers, samples, initial, saved, lists, busy, on
                 <option value="YMD">Year-month-day (2025-12-31)</option>
               </select>
             </div>
-            <Toggle checked={m.settings.autoCreate} onChange={(v) => set("autoCreate", v)} label="Create missing names" help="New vendors, customers, classes, locations and payment methods are added to QuickBooks. Accounts and products are never created by accident." />
+            <Toggle checked={m.settings.autoCreate} onChange={(v) => set("autoCreate", v)} label={SETTING_LABELS.autoCreate} help="New vendors, customers, classes, locations and payment methods are added to QuickBooks. Accounts and products are never created by accident." />
             <Toggle checked={m.settings.duplicateCheck} onChange={(v) => set("duplicateCheck", v)} label="Look for duplicates" help="Flags rows that match a transaction already in QuickBooks (same account, date and amount, or same document number)." />
-            <Toggle checked={m.settings.useFileRefNo} onChange={(v) => set("useFileRefNo", v)} label="Keep reference numbers from the file" />
+            <Toggle checked={m.settings.useFileRefNo} onChange={(v) => set("useFileRefNo", v)} label={SETTING_LABELS.useFileRefNo} />
             {(def.key === "bank-statement" || def.key === "card-statement") && <Toggle checked={m.settings.applyRules} onChange={(v) => set("applyRules", v)} label="Apply bank rules" help="Fills the account, payee and type from your rules when the file leaves them empty." />}
+            {!def.isList && <Toggle checked={m.settings.processEachLine} onChange={(v) => set("processEachLine", v)} label={SETTING_LABELS.processEachLine} help="Off groups rows into complete transactions. Modify requires this to stay off." />}
+            {!def.isList && <Toggle checked={m.settings.skipZero} onChange={(v) => set("skipZero", v)} label={SETTING_LABELS.skipZero} help="Ignore zero-value transactions. Nonzero journal lines are retained even when the entry balances." />}
+            {["expenses", "checks"].includes(def.key) && <Toggle checked={m.settings.negativeToPositive} onChange={(v) => set("negativeToPositive", v)} label={SETTING_LABELS.negativeToPositive} help="Expenses and Checks only. Does not reverse signed Bank Statements or Credit Card Statements." />}
+            <Toggle checked={m.settings.truncateText} onChange={(v) => set("truncateText", v)} label={SETTING_LABELS.truncateText} help="When off, overlong text is held for correction rather than cut." />
             <Toggle checked={m.settings.matchAccountByNumber} onChange={(v) => set("matchAccountByNumber", v)} label="Accounts can be given by number" />
           </div>
         </Panel>
@@ -193,8 +198,8 @@ export function Mapping({ cat, headers, samples, initial, saved, lists, busy, on
               Still needed: {[...missing.map((f) => f.label), ...(oneOfMissing ? [oneOf.map((f) => f.label).join(" or ")] : [])].join(", ")}. Match a column or type a value for every row.
             </p>
           ) : !amountMappingIssue && <p className="mb-3 text-[13px] text-ink-3">All required {def.label.toLowerCase()} fields are covered. Next, every row is checked against QuickBooks. Nothing is posted yet.</p>}
-          <Button variant="primary" size="lg" className="w-full" loading={busy} disabled={disabled || !!missing.length || oneOfMissing || !!amountMappingIssue} onClick={() => onSubmit(m)}>Check rows</Button>
-          {onCancel && <Button variant="ghost" className="mt-2 w-full" onClick={onCancel}>Back to review</Button>}
+          <Button variant="primary" size="lg" className="w-full" loading={busy} disabled={disabled || !!missing.length || oneOfMissing || !!amountMappingIssue} onClick={() => onSubmit(m)}>Preview Mapping</Button>
+          {onCancel && <Button variant="ghost" className="mt-2 w-full" onClick={onCancel}>Back to Preview Mapping</Button>}
         </div>
       </aside>
     </div>

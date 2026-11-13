@@ -10,6 +10,7 @@ import { logActivity } from "@/lib/audit";
 import { DEFAULT_SETTINGS, type ImportSettings } from "@/lib/types";
 import { lockJob, unlockJob } from "@/lib/import/post";
 import { UPDATE_TYPES } from "@/lib/import/updates";
+import { importSettings } from "@/lib/import/settings";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 type P = { params: Promise<{ id: string }> };
@@ -40,7 +41,8 @@ export const PUT = route(async (req: Request, { params }: P) => {
   }
   const repeated = repeatedSource(mapping);
   if (repeated) throw new Error(`The file column “${repeated}” is mapped more than once. Choose one ${def.label.toLowerCase()} field for each file column.`);
-  const settings = { ...DEFAULT_SETTINGS, ...(job.settings || {}), ...(body.settings || {}) };
+  const settings = importSettings(body.settings, { ...DEFAULT_SETTINGS, ...(job.settings || {}) });
+  if (job.operation === "update" && settings.processEachLine) throw new Error("Modify requires complete transactions. Turn off Process each line as an individual Transaction.");
 
   // compute every row's values from the file
   const R = await jobRows();

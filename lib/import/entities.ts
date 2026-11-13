@@ -4,6 +4,7 @@
 import type { EntityGroup, FieldDef, ImportSettings, Issue, RefKind } from "../types";
 import type { Resolver, Ref } from "./resolver";
 import { linkedPaymentLines } from "./deposit-links";
+import { ENTITY_LABELS } from "../terminology";
 
 export type Vals = Record<string, string>;
 export type Built = { entity: string; body: any; label: string };
@@ -866,6 +867,7 @@ function journal(key: string, label: string, sheets: string[], tb: boolean): Ent
   };
 }
 
+for (const def of ENTITIES) if (ENTITY_LABELS[def.key]) def.label = ENTITY_LABELS[def.key];
 export const ENTITY = new Map(ENTITIES.map((e) => [e.key, e]));
 export function entityDef(key: string) {
   const e = ENTITY.get(key);

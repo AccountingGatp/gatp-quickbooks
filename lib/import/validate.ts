@@ -12,6 +12,7 @@ import { dupKey, DOC_TYPES } from "./duplicates";
 import { loadPaymentLinks } from "./payment-links";
 import { prepareUpdate } from "./updates";
 import { loadUpdateTargets, targetsFor } from "./update-targets";
+import { importSettings, isZeroTransaction } from "./settings";
 export { groupKey } from "./grouping";
 
 export const STATEMENTS = new Set(["bank-statement", "card-statement"]);
@@ -45,9 +46,9 @@ export function refKinds(def: EntityDef): ListKind[] {
 }
 
 export async function jobSettings(job: JobDoc): Promise<ImportSettings> {
-  if (job.settings) return { ...DEFAULT_SETTINGS, ...job.settings };
+  if (job.settings) return importSettings(job.settings);
   const co = await (await companies()).findOne({ _id: job.realmId });
-  return { ...DEFAULT_SETTINGS, ...(co?.settings || {}) };
+  return importSettings(co?.settings);
 }
 
 /** Rows of one transaction, with header fields filled down from the first row that has them. */
@@ -63,7 +64,7 @@ export function fillGroup(def: EntityDef, rows: Vals[]): Vals[] {
   });
 }
 
-function normalise(def: EntityDef, raw: Vals, fmt: ImportSettings["dateFormat"]): { values: Vals; issues: Issue[] } {
+function normalise(def: EntityDef, raw: Vals, settings: ImportSettings): { values: Vals; issues: Issue[] } {
   const values: Vals = {};
   const issues: Issue[] = [];
   for (const f of def.fields) {
@@ -71,11 +72,14 @@ function normalise(def: EntityDef, raw: Vals, fmt: ImportSettings["dateFormat"])
     if (v == null || String(v).trim() === "") continue;
     v = String(v).trim();
     if (f.type === "date") {
-      const d = parseDate(v, fmt);
+      const d = parseDate(v, settings.dateFormat);
       if (!d) issues.push({ field: f.key, level: "error", msg: `${f.label} “${v}” is not a date I can read` });
       values[f.key] = d || v;
     } else if (f.type === "number") {
-      const n = parseNumber(v);
+      let n = parseNumber(v);
+      if (n != null && n < 0 && f.key === "amount" && settings.negativeToPositive && ["expenses", "checks"].includes(def.key)) {
+        n = Math.abs(n); issues.push({ field: f.key, level: "warning", msg: "Negative expense/check amount converted to positive by Import Settings." });
+      }
       if (n == null) issues.push({ field: f.key, level: "error", msg: `${f.label} “${v}” is not a number` });
       values[f.key] = n == null ? v : String(round2(n * 1e3) / 1e3);
     } else if (f.type === "bool") {
@@ -83,7 +87,10 @@ function normalise(def: EntityDef, raw: Vals, fmt: ImportSettings["dateFormat"])
       if (b == null) issues.push({ field: f.key, level: "warning", msg: `${f.label} “${v}” should be Yes or No — ignored` });
       else values[f.key] = String(b);
     } else {
-      if (f.max && v.length > f.max) { issues.push({ field: f.key, level: "warning", msg: `${f.label} is longer than ${f.max} characters and will be cut` }); v = v.slice(0, f.max); }
+      if (f.max && v.length > f.max) {
+        issues.push({ field: f.key, level: settings.truncateText ? "warning" : "error", msg: `${f.label} is longer than ${f.max} characters${settings.truncateText ? " and will be cut" : ". Shorten it or enable text truncation in Import Settings."}` });
+        if (settings.truncateText) v = v.slice(0, f.max);
+      }
       values[f.key] = v;
     }
   }
@@ -150,26 +157,28 @@ export async function validateJob(jobId: string, only?: Set<string>, alreadyLock
   if (!alreadyLocked && (job.status === "posting" || (job.lockUntil || 0) > Date.now())) throw new Error("Wait for posting or undo to finish before checking this import again.");
   const def = entityDef(job.entity);
   const settings = await jobSettings(job);
+  if (settings.processEachLine && job.operation === "update") throw new Error("Modify requires complete transactions. Turn off Process each line as an individual Transaction.");
   const r = new Resolver(job.realmId, settings);
   await r.load(refKinds(def));
 
   const all = await Rw.find({ jobId }).sort({ idx: 1 }).toArray();
   // 1. values from the file + fixed values; normalise; group
   const prepared = all.map((row) => {
+    if (row.status === "skipped" && row.skipReason === "zero") row.status = "pending";
     if (["posted", "posting", "rolled_back"].includes(row.status)) return { row, values: row.values, issues: row.issues, keep: true };
     const src: Vals = {};
     for (const f of def.fields) {
       const v = row.values?.[f.key];
       if (v != null && v !== "") src[f.key] = v;
     }
-    const { values, issues } = normalise(def, src, settings.dateFormat);
+    const { values, issues } = normalise(def, src, settings);
     return { row, values, issues, keep: false };
   });
-  const identities = inheritIdentity(def, prepared.map((p) => p.values), prepared.map((p) => p.row.status === "skipped"));
+  const identities = settings.processEachLine ? prepared.map((p) => p.values) : inheritIdentity(def, prepared.map((p) => p.values), prepared.map((p) => p.row.status === "skipped"));
   prepared.forEach((p, i) => { if (!p.keep) p.values = identities[i]; });
   const groups = new Map<string, typeof prepared>();
   for (const p of prepared) {
-    const g = groupKey(def, p.values, p.row.idx);
+    const g = p.keep ? p.row.group : groupKey(def, p.values, p.row.idx, settings.processEachLine);
     p.row.group = g;
     if (!groups.has(g)) groups.set(g, []);
     groups.get(g)!.push(p);
@@ -189,6 +198,10 @@ export async function validateJob(jobId: string, only?: Set<string>, alreadyLock
     if (only && !only.has(g)) continue;
     const live = items.filter((p) => !p.keep && p.row.status !== "skipped");
     if (!live.length) continue;
+    if (settings.skipZero && !live.some((p) => p.issues.some((i) => i.level === "error")) && isZeroTransaction(def, live.map((p) => p.values))) {
+      for (const p of live) { (p as any).autoSkip = true; (p as any).autoSkipZero = true; p.issues.push({ level: "warning", msg: "Skipped: zero amount (Import Settings)." }); }
+      continue;
+    }
     const conflicts = headerIssues(def, live.map((p) => p.values));
     for (const p of live) p.issues.push(...conflicts);
     const filled = fillGroup(def, live.map((p) => p.values));
@@ -260,14 +273,14 @@ export async function validateJob(jobId: string, only?: Set<string>, alreadyLock
   }
 
   // 4. build each transaction (dry run) to catch anything QuickBooks would refuse
-  const liveVals = [...groups.values()].flatMap((items) => items.filter((p) => !p.keep && p.row.status !== "skipped").map((p) => p.values));
+  const liveVals = [...groups.values()].flatMap((items) => items.filter((p) => !p.keep && p.row.status !== "skipped" && !(p as any).autoSkip).map((p) => p.values));
   await loadPaymentLinks(job.realmId, liveVals, ctx);
   const targets = job.operation === "update" ? await loadUpdateTargets(job.realmId, def.key, liveVals) : [];
   const usedTargets = new Set<string>();
   if (paysBills(def, liveVals)) { ctx.openBills = await loadOpenBills(job.realmId); ctx.usedBills = new Set(); }
   for (const [g, items] of groups) {
     if (only && !only.has(g)) continue;
-    const live = items.filter((p) => !p.keep && p.row.status !== "skipped");
+    const live = items.filter((p) => !p.keep && p.row.status !== "skipped" && !(p as any).autoSkip);
     if (!live.length) continue;
     const vals = live.map((p) => p.values);
     for (const iss of def.check?.(vals, ctx) || []) {
@@ -369,7 +382,7 @@ export async function validateJob(jobId: string, only?: Set<string>, alreadyLock
     // de-duplicate identical messages
     const seen = new Set<string>();
     const issues = p.issues.filter((i) => { const k = `${i.field}|${i.msg}`; if (seen.has(k)) return false; seen.add(k); return true; });
-    ops.push({ updateOne: { filter: { _id: p.row._id }, update: { $set: { values: p.values, issues, status, group: p.row.group, rule: p.row.rule, dup: p.row.dup, ...(p.row.target ? { target: p.row.target } : {}) }, $unset: { error: "" } } } });
+    ops.push({ updateOne: { filter: { _id: p.row._id }, update: { $set: { values: p.values, issues, status, group: p.row.group, rule: p.row.rule, dup: p.row.dup, skipReason: (p as any).autoSkipZero ? "zero" : undefined, ...(p.row.target ? { target: p.row.target } : {}) }, $unset: { error: "" } } } });
   }
   await chunked(ops, 500, async (part) => { await Rw.bulkWrite(part, { ordered: false }); });
   if (ruleHits.size) {

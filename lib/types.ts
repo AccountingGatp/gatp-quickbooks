@@ -52,6 +52,10 @@ export type ImportSettings = {
   duplicateCheck: boolean; // warn when a matching transaction is already in QuickBooks
   applyRules: boolean; // apply bank rules to statement rows
   matchAccountByNumber: boolean; // allow "6100" to match account number 6100
+  processEachLine: boolean;
+  skipZero: boolean;
+  negativeToPositive: boolean; // Expenses / Checks only; never change signed statement direction
+  truncateText: boolean;
 };
 
 export const DEFAULT_SETTINGS: ImportSettings = {
@@ -61,6 +65,10 @@ export const DEFAULT_SETTINGS: ImportSettings = {
   duplicateCheck: true,
   applyRules: true,
   matchAccountByNumber: true,
+  processEachLine: false,
+  skipZero: false,
+  negativeToPositive: false,
+  truncateText: true,
 };
 
 // ---------------------------------------------------------------- jobs
@@ -130,6 +138,7 @@ export type RowDoc = {
   rule?: string; // bank rule that filled this row
   dup?: { type: string; id: string; label: string };
   forceInclude?: boolean; // the user chose to post this row even though it looks like a duplicate
+  skipReason?: "zero";
   qbo?: QboRef;
   target?: { type: string; id: string; syncToken: string };
   original?: Record<string, any>; // complete pre-update backup; never returned in row listings

@@ -11,6 +11,7 @@ import { RefLists, accountListId, type Lists } from "@/components/import/RefList
 import { api, plural, when } from "@/lib/client";
 import { catalog } from "@/lib/import/entities";
 import { autoMap, repairStatementMapping } from "@/lib/import/automap";
+import { IMPORT_STEPS } from "@/lib/terminology";
 import { DEFAULT_SETTINGS, type Counts } from "@/lib/types";
 
 const CAT = catalog();
@@ -246,12 +247,12 @@ export default function ImportJob({ params }: { params: Promise<{ id: string }> 
           <div className="mb-3 flex flex-wrap items-center gap-2">
             <Summary c={c} />
             <div className="ml-auto flex flex-wrap gap-2">
-              {editable && c.posted === 0 && <Button size="sm" icon={<Columns3 className="size-3.5" />} onClick={() => setRemap(true)}>Change columns</Button>}
-              {editable && <Button size="sm" icon={<RefreshCw className="size-3.5" />} loading={busy === "check"} onClick={() => recheck(true)} title="Re-read accounts, names and items from QuickBooks, then check every row again">Check again</Button>}
+              {editable && c.posted === 0 && <Button size="sm" icon={<Columns3 className="size-3.5" />} onClick={() => setRemap(true)}>Mapping</Button>}
+              {editable && <Button size="sm" icon={<RefreshCw className="size-3.5" />} loading={busy === "check"} onClick={() => recheck(true)} title="Re-read accounts, names and items from QuickBooks, then check every row again">Validate</Button>}
               {editable && <Button size="sm" icon={<EyeOff className="size-3.5" />} loading={busy === "dups"} onClick={skipDups}>Leave out duplicates</Button>}
-              <Button size="sm" icon={<Download className="size-3.5" />} loading={busy === "dl"} onClick={downloadResults}>Download results</Button>
+              <Button size="sm" icon={<Download className="size-3.5" />} loading={busy === "dl"} onClick={downloadResults}>Download Results</Button>
               {editable && c.error > 0 && def.fields.some((f) => f.key === "item") && <Button size="sm" loading={busy === "products"} onClick={downloadMissingProducts}>Missing products template</Button>}
-              {c.posted > 0 && !run && <Button size="sm" variant="ghost" className="text-red hover:bg-red-soft" icon={<Undo2 className="size-3.5" />} onClick={() => setConfirm("undo")}>Undo import</Button>}
+              {c.posted > 0 && !run && <Button size="sm" variant="ghost" className="text-red hover:bg-red-soft" icon={<Undo2 className="size-3.5" />} onClick={() => setConfirm("undo")}>Undo</Button>}
               {c.posted === 0 && !run && st !== "rolled_back" && <Button size="sm" variant="ghost" icon={<Trash2 className="size-3.5" />} onClick={() => setConfirm("discard")}>Discard</Button>}
             </div>
           </div>
@@ -279,7 +280,7 @@ export default function ImportJob({ params }: { params: Promise<{ id: string }> 
                   </> : <span className="text-ink-3">{c.error ? "Fix the rows marked in red to post them." : "Nothing left to post."}</span>}
                 </div>
                 <Button variant="primary" size="lg" className="ml-auto" disabled={c.ready === 0} onClick={() => setConfirm("post")} icon={<Send className="size-4" />}>
-                  {c.posted > 0 ? `Post ${plural(c.ready, "more row")}` : `Post ${plural(c.ready, "row")} to QuickBooks`}
+                  {job.operation === "update" ? `Modify in QuickBooks (${plural(c.ready, "row")})` : c.posted > 0 ? `Import ${plural(c.ready, "more row")} to QuickBooks` : `Import to QuickBooks (${plural(c.ready, "row")})`}
                 </Button>
               </div>
             </div>
@@ -306,8 +307,8 @@ export default function ImportJob({ params }: { params: Promise<{ id: string }> 
       </Modal>
 
       {/* confirms */}
-      <Modal open={confirm === "post"} onClose={() => setConfirm("")} title={job.operation === "update" ? "Update existing QuickBooks records?" : "Post to QuickBooks?"}
-        footer={<><Button onClick={() => setConfirm("")}>Cancel</Button><Button variant="primary" icon={<Send className="size-4" />} onClick={() => loop("post")}>{job.operation === "update" ? "Update" : "Post"} {plural(c.ready, "row")}</Button></>}>
+      <Modal open={confirm === "post"} onClose={() => setConfirm("")} title={job.operation === "update" ? "Update existing QuickBooks records?" : "Import to QuickBooks?"}
+        footer={<><Button onClick={() => setConfirm("")}>Cancel</Button><Button variant="primary" icon={<Send className="size-4" />} onClick={() => loop("post")}>{job.operation === "update" ? "Modify" : "Import"} {plural(c.ready, "row")}</Button></>}>
         <div className="mb-3 rounded-[var(--radius-md)] border border-green-line bg-green-soft px-3 py-2.5">
           <div className="text-[12px] text-green">Company</div>
           <div className="text-[16px] font-semibold text-ink">{job.companyName}</div>
@@ -322,7 +323,7 @@ export default function ImportJob({ params }: { params: Promise<{ id: string }> 
         <p className="mt-3 text-[12.5px] text-ink-3">You can undo the whole import afterwards from this page or from History.</p>
       </Modal>
       <Modal open={confirm === "undo"} onClose={() => setConfirm("")} title="Undo this import?"
-        footer={<><Button onClick={() => setConfirm("")}>Keep it</Button><Button variant="danger" icon={<Undo2 className="size-4" />} onClick={() => loop("undo")}>Undo import</Button></>}>
+        footer={<><Button onClick={() => setConfirm("")}>Keep it</Button><Button variant="danger" icon={<Undo2 className="size-4" />} onClick={() => loop("undo")}>Undo</Button></>}>
         {job.operation === "update" ? <p>Restores the saved originals for {plural(c.posted, "updated row")} in <b>{job.companyName}</b>. Records edited after the update are preserved.</p> : <p>Deletes the {plural(c.posted, "posted row")} of this import from <b className="text-ink">{job.companyName}</b>. Records that QuickBooks never deletes (customers, vendors, items, accounts) are made inactive instead.</p>}
         <p className="mt-2 text-[12.5px] text-ink-3">Records edited in QuickBooks since posting are preserved. Automatically created names remain active.</p>
       </Modal>
@@ -335,7 +336,7 @@ export default function ImportJob({ params }: { params: Promise<{ id: string }> 
 }
 
 function Stepper({ step, done }: { step: number; done: boolean }) {
-  const steps = ["Upload", "Match columns", "Review", "Post"];
+  const steps = IMPORT_STEPS;
   return (
     <ol className="flex items-center gap-1.5 text-[12.5px]">
       {steps.map((s, i) => {

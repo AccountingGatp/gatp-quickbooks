@@ -36,8 +36,8 @@ export function Badge({ tone = "gray", children, className }: { tone?: Tone; chi
 }
 
 export const JOB_STATUS: Record<string, { label: string; tone: Tone }> = {
-  mapping: { label: "Match columns", tone: "gray" },
-  review: { label: "In review", tone: "blue" },
+  mapping: { label: "Mapping", tone: "gray" },
+  review: { label: "Preview Mapping", tone: "blue" },
   posting: { label: "Posting", tone: "blue" },
   completed: { label: "Posted", tone: "green" },
   partial: { label: "Partly posted", tone: "amber" },
@@ -211,3 +211,4 @@ export function Stat({ label, value, sub, tone, icon, chip = "green" }: { label:
     </div>
   );
 }
+

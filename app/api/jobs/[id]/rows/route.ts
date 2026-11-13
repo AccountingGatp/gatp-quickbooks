@@ -85,8 +85,8 @@ export const PATCH = route(async (req: Request, { params }: P) => {
   for (const e of body.edits || []) byIdx.set(e.idx, { ...(byIdx.get(e.idx) || {}), [e.field]: e.value });
   if (byIdx.size) await apply([...byIdx.keys()], (r) => ({ values: { ...r.values, ...byIdx.get(r.idx) }, ...(r.status === "failed" ? { status: "pending" as const } : {}) }));
   if (body.fill?.idxs?.length) await apply(body.fill.idxs, (r) => ({ values: { ...r.values, [body.fill!.field]: body.fill!.value }, ...(r.status === "failed" ? { status: "pending" as const } : {}) }));
-  if (body.skip?.length) await apply(body.skip, () => ({ status: "skipped", forceInclude: false }));
-  if (body.unskip?.length) await apply(body.unskip, (r) => ({ status: "pending", ...(r.dup ? { forceInclude: true } : {}) }));
+  if (body.skip?.length) await apply(body.skip, () => ({ status: "skipped", forceInclude: false, skipReason: undefined }));
+  if (body.unskip?.length) await apply(body.unskip, (r) => ({ status: "pending", skipReason: undefined, ...(r.dup ? { forceInclude: true } : {}) }));
   if (body.skipDuplicates) {
     const d = (await R.find({ jobId, status: "ready" }).toArray()).filter((x) => x.dup);
     await apply(d.map((x) => x.idx), () => ({ status: "skipped" }));
