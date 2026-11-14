@@ -1,0 +1,472 @@
+{
+  "bill-payments": {
+    "sheetName": "Bill Payments",
+    "headers": [
+      "Ref No",
+      "Vendor",
+      "Payment Date",
+      "Bank or CC Account",
+      "Memo",
+      "Bill No",
+      " Amount",
+      "Currency Code",
+      "Exchange Rate",
+      "Print Status"
+    ]
+  },
+  "bills": {
+    "sheetName": "Bills",
+    "headers": [
+      "Bill No",
+      "Vendor",
+      "Bill Date",
+      "Mailing Address Line 1",
+      "Memo",
+      "Expense Account ",
+      "Expense Description",
+      "Expense Line Amount"
+    ]
+  },
+  "expenses": {
+    "sheetName": "Expenses",
+    "headers": [
+      "Ref No",
+      "Account",
+      "Payee",
+      "Memo",
+      "Payment Date",
+      "Payment Method",
+      "Expense Account ",
+      "Expense Description",
+      "Expense Line Amount"
+    ]
+  },
+  "checks": {
+    "sheetName": "Checks",
+    "headers": [
+      "Check no",
+      "Bank Account ",
+      "Payee",
+      "Payment Date",
+      "Mailing Address Line 1",
+      "Memo",
+      "Expense Account ",
+      "Expense Description",
+      "Expense Line Amount"
+    ]
+  },
+  "card-credits": {
+    "sheetName": "Credit Card Credits",
+    "headers": [
+      "Ref No",
+      "Account",
+      "Payee",
+      "Memo",
+      "Payment Date",
+      "Expense Account ",
+      "Expense Description",
+      "Expense Line Amount"
+    ]
+  },
+  "credit-memos": {
+    "sheetName": "Credit Memos",
+    "headers": [
+      "Credit Memo No",
+      "Customer",
+      "Credit Memo Date",
+      "Memo",
+      "Billing Address Line 1",
+      "Product/Service",
+      "Product/Service Description",
+      "Product/Service Quantity",
+      "Product/Service Rate",
+      "Product/Service Amount",
+      "Product/Service Taxable"
+    ]
+  },
+  "accounts": {
+    "sheetName": "Accounts",
+    "headers": [
+      "Name",
+      "Account Type",
+      "Account Subtype",
+      "Account Number",
+      "Parent Account",
+      "Description",
+      "Opening Balance",
+      "Opening Balance Date",
+      "Currency Code"
+    ]
+  },
+  "customers": {
+    "sheetName": "Customers",
+    "headers": [
+      "Title",
+      "Company",
+      "First Name",
+      "Middle Name",
+      "Last Name",
+      "Suffix",
+      "Display Name As",
+      "Print On Check As",
+      "Billing Address Line 1",
+      "Billing Address Line 2",
+      "Billing Address Line 3",
+      "Billing Address City",
+      "Billing Address Postal Code",
+      "Billing Address Country",
+      "Billing Address State",
+      "Shipping Address Line 1",
+      "Shipping Address Line 2",
+      "Shipping Address Line 3",
+      "Shipping Address City",
+      "Shipping Address Postal Code",
+      "Shipping Address Country",
+      "Shipping Address State",
+      "Phone",
+      "Mobile",
+      "Fax",
+      "Other",
+      "Website",
+      "Email",
+      "Terms",
+      "Preferred Payment Method",
+      "Tax Resale No",
+      "Preferred Delivery Method",
+      "Bill With Parent",
+      "Parent Customer ",
+      "Opening Balance",
+      "Open Balance Date",
+      "Notes",
+      "Customer Taxable",
+      "Currency Code"
+    ]
+  },
+  "estimates": {
+    "sheetName": "Estimates",
+    "headers": [
+      "Estimate No",
+      "Customer",
+      "Estimate Date",
+      "Billing Address Line 1",
+      "Shipping Address Line 1",
+      "Memo",
+      "Message displayed on estimate",
+      "Email",
+      "Product/Service",
+      "Product/Service Description",
+      "Product/Service Quantity",
+      "Product/Service Rate",
+      "Product/Service Amount",
+      "Product/Service Taxable"
+    ]
+  },
+  "invoices": {
+    "sheetName": "Invoices",
+    "headers": [
+      "Invoice No",
+      "Customer ",
+      "Invoice Date",
+      "Billing Address Line 1",
+      "Shipping Address Line 1",
+      "Memo",
+      "Message displayed on invoice",
+      "Email",
+      "Product/Service",
+      "Product/Service Description",
+      "Product/Service Quantity",
+      "Product/Service Rate",
+      "Product/Service Amount",
+      "Product/Service Taxable"
+    ]
+  },
+  "trial-balance": {
+    "sheetName": "Trial Balance",
+    "headers": [
+      "Trial Balance No",
+      "Date",
+      "Amount(credit or debit)",
+      "Description",
+      "Name",
+      "Account",
+      "Account Type",
+      "Account Subtype"
+    ]
+  },
+  "journal-entries": {
+    "sheetName": "Journal Entries",
+    "headers": [
+      "Journal No",
+      "Journal Date",
+      "Memo",
+      " Account ",
+      " Amount",
+      " Description",
+      "Name",
+      "Location",
+      "Class ",
+      "Currency Code",
+      "Exchange Rate",
+      "Is Adjustment"
+    ]
+  },
+  "locations": {
+    "sheetName": "Locations",
+    "headers": [
+      "Name",
+      "Parent Location"
+    ]
+  },
+  "classes": {
+    "sheetName": "Class",
+    "headers": [
+      "Name",
+      "Parent Class"
+    ]
+  },
+  "items": {
+    "sheetName": "Items",
+    "headers": [
+      "Name",
+      "Type",
+      "SKU",
+      "Price/Rate",
+      "Sales Description",
+      "Taxable",
+      "Purchase Description",
+      "Cost",
+      "Income Account ",
+      "Expense Account ",
+      "Category",
+      "Inventory Asset Account",
+      "Initial Quantity On Hand",
+      "As Of Date",
+      "Sales Tax Included",
+      "Purchase Tax Included"
+    ]
+  },
+  "deposits": {
+    "sheetName": "Deposits",
+    "headers": [
+      "Deposit No",
+      "Date",
+      "Deposit To Account",
+      "Received From",
+      "Line Account",
+      "Line Description",
+      "Line Payment Method",
+      "Line Ref No",
+      "Line Amount",
+      "Line Class",
+      "Memo"
+    ]
+  },
+  "purchase-orders": {
+    "sheetName": "Purchase Orders",
+    "headers": [
+      "PO No",
+      "Vendor",
+      "Purchase Order Date",
+      "Mailing Address Line 1",
+      "Shipping Address Line 1",
+      "Memo",
+      "Product/Service",
+      "Product/Service Description",
+      "Product/Service Quantity",
+      "Product/Service Rate",
+      "Product/Service Amount"
+    ]
+  },
+  "bank-statement": {
+    "sheetName": "Bank Statement",
+    "headers": [
+      "Date",
+      "Description",
+      "Payee",
+      "Account",
+      "Amount"
+    ]
+  },
+  "card-payments": {
+    "sheetName": "Pay down Credit card",
+    "headers": [
+      "Credit Card Account",
+      "Payee",
+      "Amount",
+      "Date",
+      "Bank Account",
+      "Memo"
+    ]
+  },
+  "card-statement": {
+    "sheetName": "CreditCardStatement",
+    "headers": [
+      "Date",
+      "Description",
+      "Payee",
+      "Amount",
+      "Category Account",
+      "Transaction Type",
+      "Bank Account",
+      "Credit Card Account"
+    ]
+  },
+  "receive-payments": {
+    "sheetName": "Receive Payment",
+    "headers": [
+      "Ref No",
+      "Payment Date",
+      "Customer ",
+      "Payment method",
+      "Deposit To Account Name",
+      "Invoice No",
+      "Amount",
+      "Reference No"
+    ]
+  },
+  "refund-receipts": {
+    "sheetName": "Refund Receipts",
+    "headers": [
+      "Refund Receipt No",
+      "Customer ",
+      "Refund Receipt date",
+      "Refunded From",
+      "Payment method",
+      "Billing Address Line 1",
+      "Memo",
+      "Message displayed on refund receipt",
+      "Email",
+      "Product/Service",
+      "Product/Service Description",
+      "Product/Service Quantity",
+      "Product/Service Rate",
+      "Product/Service Amount",
+      "Product/Service Taxable"
+    ]
+  },
+  "sales-receipts": {
+    "sheetName": "Sales Receipts",
+    "headers": [
+      "Sales Receipt No",
+      "Customer ",
+      "Sales Receipt Date",
+      "Deposit To",
+      "Payment Method",
+      "Billing Address Line 1",
+      "Shipping Address Line 1",
+      "Memo",
+      "Message displayed on sales receipt",
+      "Email",
+      "Product/Service",
+      "Product/Service Description",
+      "Product/Service Quantity",
+      "Product/Service Rate",
+      "Product/Service Amount",
+      "Product/Service Taxable"
+    ]
+  },
+  "time-activities": {
+    "sheetName": "Time Activities",
+    "headers": [
+      "Name",
+      "Date",
+      "Hours",
+      "Minutes",
+      "Start Time",
+      "End Time",
+      "Description",
+      "Service",
+      "Hourly Rate",
+      "Taxable",
+      "Class",
+      "Location"
+    ]
+  },
+  "vendor-credits": {
+    "sheetName": "Vendor Credits",
+    "headers": [
+      "Ref No",
+      "Vendor",
+      "Mailing Address Line 1",
+      "Payment Date",
+      "Memo",
+      "Expense Account ",
+      "Expense Description",
+      "Expense Line Amount"
+    ]
+  },
+  "vendors": {
+    "sheetName": "Vendors",
+    "headers": [
+      "Display Name As",
+      "Title",
+      "First Name",
+      "Middle Name",
+      "Last Name",
+      "Suffix",
+      "Company",
+      "Print On Check As",
+      "Billing Address Line 1",
+      "Billing Address Line 2",
+      "Billing Address Line 3",
+      "Billing Address City",
+      "Billing Address Postal Code",
+      "Billing Address Country",
+      "Billing Address State",
+      "Notes",
+      "Email",
+      "Phone",
+      "Mobile",
+      "Fax",
+      "Other",
+      "Website",
+      "Terms",
+      "Opening Balance",
+      "Account no",
+      "Tax ID",
+      "Track payments for 1099",
+      "Currency Code"
+    ]
+  },
+  "employees": {
+    "sheetName": "Employee",
+    "headers": [
+      "Title",
+      "First Name",
+      "Middle Name",
+      "Last Name",
+      "Suffix",
+      "Display Name As",
+      "Print On Check As",
+      " Address Line 1",
+      " Address Line 2",
+      " Address City",
+      " Address Postal Code",
+      " Address Country",
+      " Address State",
+      "SSN",
+      "Employee No",
+      "Email",
+      "Phone",
+      "Mobile",
+      "Billable Time",
+      "Billing Rate",
+      "Gender",
+      "Hired Date",
+      "Released Date",
+      "Birth Date"
+    ]
+  },
+  "transfers": {
+    "sheetName": "Transfers",
+    "headers": [
+      "Transfer Funds From",
+      "Transfer Funds To",
+      "Transfer Amount",
+      "Memo",
+      "Currency Code",
+      "Exchange Rate",
+      "Date"
+    ]
+  }
+}
