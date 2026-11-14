@@ -1,13 +1,12 @@
 "use client";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import * as XLSX from "xlsx";
 import { FileSpreadsheet, UploadCloud, Link2, Download, Sparkles, ArrowRight, Building2, Upload } from "lucide-react";
 import { Badge, Button, Empty, IconChip, JobStatus, PageHeader, Panel, Progress, Spinner, cx, useToast } from "@/components/ui";
 import { ENTITY_ICON, GROUP_TONE } from "@/components/entityIcons";
 import { api, plural, when } from "@/lib/client";
-import { catalog, type CatalogEntity } from "@/lib/import/entities";
+import { catalog } from "@/lib/import/entities";
 import { detectEntity } from "@/lib/import/automap";
 import { readWorkbook, type ParsedSheet } from "@/lib/parse/file";
 import { modificationSheet, UPDATE_TYPES } from "@/lib/import/updates";
@@ -51,7 +50,7 @@ export default function ImportStart() {
     try {
       if (/\.pdf$/i.test(name)) throw new Error("PDF statements are not supported yet. Export the statement from online banking as CSV or Excel (most banks offer “Download transactions”).");
       const sheets = readWorkbook(buf, name);
-      if (!sheets.length) throw new Error("No rows found in this file. Check that the first sheet has a header row and data under it.");
+      if (!sheets.length) throw new Error("No transaction rows found. If this is a blank template, fill in the required sheets below their headings, save it, and upload it again.");
       setFile({
         name, sheets: sheets.map((s) => {
           const detected = detectEntity(s.name, s.headers, CAT);
@@ -93,13 +92,6 @@ export default function ImportStart() {
     } catch (e) { toast("error", (e as Error).message); setUpload(null); }
   }
 
-  function template(e: CatalogEntity) {
-    const ws = XLSX.utils.aoa_to_sheet([e.fields.map((f) => f.label)]);
-    ws["!cols"] = e.fields.map((f) => ({ wch: Math.max(12, f.label.length + 2) }));
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, e.label.slice(0, 31));
-    XLSX.writeFile(wb, `GATP Ledger template - ${e.label}.xlsx`);
-  }
 
   if (company === undefined) return <div className="py-20 text-center"><Spinner /></div>;
   if (company === null) return (
@@ -125,7 +117,8 @@ export default function ImportStart() {
         <div className="space-y-5">
           {/* file */}
           {!file ? (
-            <Panel title="Your file">
+            <Panel title="Your file" actions={<a href="/api/templates" className="inline-flex items-center gap-1.5 rounded px-2.5 py-1.5 text-[12.5px] font-medium text-green hover:bg-green-soft"><Download className="size-3.5" />Download Sample Template</a>}>
+              <p className="mb-4 text-[12.5px] text-ink-3">Use the blank banking workbook with the same sheet names and column headings as your SaasAnt sample. Fill only the sheets you need, keep the headings, and upload the completed file. No example transactions are included.</p>
               <label onDragOver={(e) => { e.preventDefault(); setDrag(true); }} onDragLeave={() => setDrag(false)} onDrop={(e) => { e.preventDefault(); setDrag(false); onFile(e.dataTransfer.files[0]); }}
                 className={cx("flex cursor-pointer flex-col items-center justify-center rounded-[var(--radius-md)] border-2 border-dashed px-6 py-12 text-center transition-colors", drag ? "border-green bg-green-soft" : "border-green-line/70 bg-[#f8fbf9] hover:border-green hover:bg-green-soft/50")}>
                 <input ref={input} type="file" accept={ACCEPT} hidden onChange={(e) => onFile(e.target.files?.[0])} />
@@ -170,7 +163,7 @@ export default function ImportStart() {
             </Panel>
           )}
           {/* what */}
-          <Panel title="Select QuickBooks Entity" actions={chosen && <Button size="sm" variant="ghost" icon={<Download className="size-3.5" />} onClick={() => template(chosen)}>Blank template</Button>}>
+          <Panel title="Select QuickBooks Entity" actions={<a href={`/api/templates?type=${encodeURIComponent(chosen?.key || "banking")}`} className="inline-flex items-center gap-1.5 rounded px-2.5 py-1.5 text-[12.5px] font-medium text-green hover:bg-green-soft"><Download className="size-3.5" />{chosen ? "Download This Template" : "Download Sample Template"}</a>}>
             <button onClick={() => setType("auto")} className={cx("mb-5 flex w-full items-center gap-3 rounded-[var(--radius-md)] border px-3.5 py-3 text-left transition-colors", type === "auto" ? "border-green bg-green-soft ring-1 ring-green" : "border-rule hover:border-green-line")}>
               <IconChip tone="green"><Sparkles /></IconChip>
               <span><span className="block text-[13.5px] font-semibold">Work it out from the file</span><span className="block text-[12.5px] text-ink-3">Reads the sheet names and column titles. SaasAnt template files are recognised sheet by sheet.</span></span>
@@ -201,6 +194,12 @@ export default function ImportStart() {
         </div>
 
         <aside className="space-y-5">
+          <Panel title="Bank template guidance">
+            <p className="text-[13px] text-ink-2">Bank Statement: positive Amount = money in; negative = money out. Account is the category; choose the actual bank account during Mapping.</p>
+            <p className="mt-3 text-[13px] text-ink-2">CreditCardStatement: positive Amount = charge; negative = credit or payment. Confirm Amount signs during Mapping.</p>
+            <p className="mt-3 text-[13px] text-ink-2">Use exact QuickBooks account and payee names, real transaction dates, and unique reference numbers. Rows with the same reference can become one transaction. Bill Payments require existing bills. Deposits from Undeposited Funds require payment links and cannot be recreated from this simple template alone.</p>
+            <p className="mt-3 text-[13px] text-ink-2">Review unused columns, errors, duplicates and totals before Import to QuickBooks. A matching template does not confirm that the accounting entries are correct.</p>
+          </Panel>
           <Panel title="How it works">
             <ol className="space-y-3 text-[13px] text-ink-2">
               {[
