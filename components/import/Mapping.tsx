@@ -132,7 +132,7 @@ export function Mapping({ cat, headers, samples, initial, saved, lists, busy, on
     <div className="mt-5 grid gap-5 xl:grid-cols-[1fr_320px]">
       <RefLists lists={lists} />
       <div className="space-y-5">
-        <Panel pad={false} title={`Mapping — ${def.label}`} actions={matching ? <Badge tone="blue">Matching {def.label.toLowerCase()}…</Badge> : matchingSaved
+        <Panel pad={false} title={`Map Fields — ${def.label}`} actions={matching ? <Badge tone="blue">Matching {def.label.toLowerCase()}…</Badge> : matchingSaved
           ? <Badge tone="green"><Wand2 className="size-3" /> Saved {def.label.toLowerCase()} matching (by {matchingSaved.updatedBy})</Badge>
           : <Badge tone="blue"><Wand2 className="size-3" /> Matched for {def.label.toLowerCase()}</Badge>}>
           <p className="border-b border-rule-2 px-4 py-3 text-[12.5px] text-ink-3">{headers.length} columns read from your worksheet · {used.size} mapped. Your column titles and sample values appear on the left; choose the matching QuickBooks field on the right.</p>
@@ -198,8 +198,8 @@ export function Mapping({ cat, headers, samples, initial, saved, lists, busy, on
               Still needed: {[...missing.map((f) => f.label), ...(oneOfMissing ? [oneOf.map((f) => f.label).join(" or ")] : [])].join(", ")}. Match a column or type a value for every row.
             </p>
           ) : !amountMappingIssue && <p className="mb-3 text-[13px] text-ink-3">All required {def.label.toLowerCase()} fields are covered. Next, every row is checked against QuickBooks. Nothing is posted yet.</p>}
-          <Button variant="primary" size="lg" className="w-full" loading={busy} disabled={disabled || !!missing.length || oneOfMissing || !!amountMappingIssue} onClick={() => onSubmit(m)}>Preview Mapping</Button>
-          {onCancel && <Button variant="ghost" className="mt-2 w-full" onClick={onCancel}>Back to Preview Mapping</Button>}
+          <Button variant="primary" size="lg" className="w-full" loading={busy} disabled={disabled || !!missing.length || oneOfMissing || !!amountMappingIssue} onClick={() => onSubmit(m)}>Review</Button>
+          {onCancel && <Button variant="ghost" className="mt-2 w-full" onClick={onCancel}>Back to Review</Button>}
         </div>
       </aside>
     </div>

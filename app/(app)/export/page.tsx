@@ -46,7 +46,7 @@ export default function ExportPage() {
 
   return (
     <>
-      <PageHeader icon={<Download />} tone="teal" title="Export" sub={<>Download transactions or lists from <b className="font-semibold text-ink">{co || "the active company"}</b> to Excel or CSV. Transactions get one row per line.</>} />
+      <PageHeader icon={<Download />} tone="teal" title="Download" sub={<>Download transactions or lists from <b className="font-semibold text-ink">{co || "the active company"}</b> to Excel or CSV. Transactions get one row per line.</>} />
       <Panel className="mb-5"><SearchForm busy={busy} onSearch={run} submitLabel="Find records" /></Panel>
       {res && (
         <Panel pad={false} title={busy ? `Reading from QuickBooks… ${res.loaded.toLocaleString()} so far` : `${plural(res.items.length, "record")} found${res.rows.length !== res.items.length ? `, ${plural(res.rows.length, "row")} with lines` : ""}`}
