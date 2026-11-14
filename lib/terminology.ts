@@ -9,7 +9,7 @@ export const ENTITY_LABELS: Record<string, string> = {
   "receive-payments": "Received Payments", "journal-entries": "Journal Entries", "trial-balance": "Trial Balance", "time-activities": "Time Activities",
   customers: "Customer", vendors: "Vendor", employees: "Employee", items: "Product/Services", accounts: "Chart of Accounts", classes: "Classes", locations: "Locations/Department",
 };
-export const IMPORT_STEPS = ["File Selection", "Mapping", "Preview Mapping", "Import to QuickBooks"];
+export const IMPORT_STEPS = ["Upload", "Map Fields", "Review", "File Processing"];
 export const SETTING_LABELS = {
   dateFormat: "Date Format",
   autoCreate: "Auto Create List Entities in QuickBooks",

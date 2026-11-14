@@ -36,8 +36,8 @@ export function Badge({ tone = "gray", children, className }: { tone?: Tone; chi
 }
 
 export const JOB_STATUS: Record<string, { label: string; tone: Tone }> = {
-  mapping: { label: "Mapping", tone: "gray" },
-  review: { label: "Preview Mapping", tone: "blue" },
+  mapping: { label: "Map Fields", tone: "gray" },
+  review: { label: "Review", tone: "blue" },
   posting: { label: "Posting", tone: "blue" },
   completed: { label: "Posted", tone: "green" },
   partial: { label: "Partly posted", tone: "amber" },
@@ -67,7 +67,7 @@ export function PageHeader({ title, sub, actions, children, icon, tone }: { titl
       <div className="flex min-w-0 items-start gap-3.5">
         {icon && <IconChip tone={tone} size="lg">{icon}</IconChip>}
         <div className="min-w-0">
-          <h1 className="text-[24px] font-semibold leading-tight tracking-[-0.02em] text-ink">{title}</h1>
+          <h1 className="text-[20px] font-semibold leading-tight tracking-[-0.01em] text-ink">{title}</h1>
           {sub && <p className="mt-1 max-w-[76ch] text-[13.5px] text-ink-3">{sub}</p>}
           {children}
         </div>

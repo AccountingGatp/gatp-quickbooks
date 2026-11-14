@@ -11,7 +11,7 @@ import { RefLists, accountListId, type Lists } from "@/components/import/RefList
 import { api, plural, when } from "@/lib/client";
 import { catalog } from "@/lib/import/entities";
 import { autoMap, repairStatementMapping } from "@/lib/import/automap";
-import { IMPORT_STEPS } from "@/lib/terminology";
+import { ImportSteps } from "@/components/import/ImportSteps";
 import { DEFAULT_SETTINGS, type Counts } from "@/lib/types";
 
 const CAT = catalog();
@@ -218,9 +218,9 @@ export default function ImportJob({ params }: { params: Promise<{ id: string }> 
             Into <b className="font-semibold text-ink">{job.companyName}</b>. From {job.fileName}{job.sheetName ? `, sheet “${job.sheetName}”` : ""}. Started by {job.user}, {when(job.createdAt)}.
           </p>
         </div>
-        <Stepper step={step} done={finished} />
       </div>
 
+      <div className="import-workspace"><ImportSteps step={step} done={finished} /><div className="min-w-0">
       {job.operation === "update" && <Notice tone="amber">Update existing records in <b>{job.companyName}</b>. Every product/service line of a matched invoice or credit memo is replaced by this file. Existing IDs are preserved; paid/applied, taxable and complex records are blocked. Undo restores the saved original if no one has edited it since.</Notice>}
       {/* step 2: columns */}
       {(st === "mapping" || remap) && initial && (
@@ -247,7 +247,7 @@ export default function ImportJob({ params }: { params: Promise<{ id: string }> 
           <div className="mb-3 flex flex-wrap items-center gap-2">
             <Summary c={c} />
             <div className="ml-auto flex flex-wrap gap-2">
-              {editable && c.posted === 0 && <Button size="sm" icon={<Columns3 className="size-3.5" />} onClick={() => setRemap(true)}>Mapping</Button>}
+              {editable && c.posted === 0 && <Button size="sm" icon={<Columns3 className="size-3.5" />} onClick={() => setRemap(true)}>Map Fields</Button>}
               {editable && <Button size="sm" icon={<RefreshCw className="size-3.5" />} loading={busy === "check"} onClick={() => recheck(true)} title="Re-read accounts, names and items from QuickBooks, then check every row again">Validate</Button>}
               {editable && <Button size="sm" icon={<EyeOff className="size-3.5" />} loading={busy === "dups"} onClick={skipDups}>Leave out duplicates</Button>}
               <Button size="sm" icon={<Download className="size-3.5" />} loading={busy === "dl"} onClick={downloadResults}>Download Results</Button>
@@ -288,6 +288,7 @@ export default function ImportJob({ params }: { params: Promise<{ id: string }> 
         </>
       )}
 
+      </div></div>
       {/* running */}
       <Modal open={!!run} onClose={() => {}} title={run?.kind === "undo" ? "Undoing import" : `Posting to ${job.companyName}`}>
         {run && (() => {
@@ -332,26 +333,6 @@ export default function ImportJob({ params }: { params: Promise<{ id: string }> 
         Nothing from it is in QuickBooks. The uploaded rows are removed from GATP Ledger.
       </Modal>
     </>
-  );
-}
-
-function Stepper({ step, done }: { step: number; done: boolean }) {
-  const steps = IMPORT_STEPS;
-  return (
-    <ol className="flex items-center gap-1.5 text-[12.5px]">
-      {steps.map((s, i) => {
-        const n = i + 1, complete = n < step || (done && n === 4), current = n === step && !done;
-        return (
-          <li key={s} className="flex items-center gap-1.5">
-            {i > 0 && <span className={cx("h-px w-5", complete || current ? "bg-green-line" : "bg-rule")} />}
-            <span className={cx("num grid size-5 place-items-center rounded-full border text-[11px] font-semibold", complete ? "border-green bg-green text-white" : current ? "border-green text-green" : "border-rule text-ink-4")}>
-              {complete ? <Check className="size-3" strokeWidth={3} /> : n}
-            </span>
-            <span className={cx(current ? "font-semibold text-ink" : complete ? "text-ink-2" : "text-ink-4")}>{s}</span>
-          </li>
-        );
-      })}
-    </ol>
   );
 }
 
